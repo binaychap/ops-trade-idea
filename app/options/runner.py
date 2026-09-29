@@ -25,7 +25,7 @@ from app.feeds.optionomics_client import fetch_trade_ideas
 from fastapi import FastAPI
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import SettingsConfigDict
-from app.config.webull import resolve_webull_endpoint
+from app.config.webull import resolve_webull_endpoint, resolve_webull_credentials
 from app.config.strategy import StrategyExitSettings, exit_percentages, options_margin_account_id
 from webull.core.client import ApiClient
 from webull.data.data_client import DataClient
@@ -66,8 +66,6 @@ class Settings(StrategyExitSettings):
     optionomics_poll_enabled: bool = Field(default=True, alias="OPTIONOMICS_POLL_ENABLED")
     optionomics_poll_interval_seconds: int = Field(default=600, ge=1, alias="OPTIONOMICS_POLL_INTERVAL_SECONDS")
 
-    webull_app_key: str | None = Field(default=None, alias="WEBULL_APP_KEY")
-    webull_app_secret: str | None = Field(default=None, alias="WEBULL_APP_SECRET")
 
     database_path: str = Field(default="bot.sqlite3", alias="DATABASE_PATH")
 
@@ -341,8 +339,7 @@ def fetch_webull_option_chain(
     target_strike: float | None = None,
     settings: Settings | None = None,
 ) -> dict[str, Any] | None:
-    app_key = (settings.webull_app_key if settings else None) or os.getenv("WEBULL_APP_KEY")
-    app_secret = (settings.webull_app_secret if settings else None) or os.getenv("WEBULL_APP_SECRET")
+    app_key, app_secret = resolve_webull_credentials(settings)
     if not app_key or not app_secret:
         return None
 
@@ -1002,8 +999,7 @@ def get_webull_valid_expiry(
         return None
 
     module = _load_webull_option_chain_module()
-    app_key = (settings.webull_app_key if settings else None) or os.getenv("WEBULL_APP_KEY")
-    app_secret = (settings.webull_app_secret if settings else None) or os.getenv("WEBULL_APP_SECRET")
+    app_key, app_secret = resolve_webull_credentials(settings)
     if not app_key or not app_secret:
         return None
 

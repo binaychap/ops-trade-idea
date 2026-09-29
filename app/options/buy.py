@@ -1,11 +1,10 @@
 from app.common.paths import ENV_FILE
-import os
 import uuid
 import json
 
 from dotenv import load_dotenv
 import sys
-from app.config.webull import resolve_webull_endpoint
+from app.config.webull import resolve_webull_endpoint, resolve_webull_credentials
 from webull.core.client import ApiClient
 from webull.trade.trade_client import TradeClient
 
@@ -15,8 +14,7 @@ load_dotenv(ENV_FILE)
 # CONFIGURATION
 # ==========================================================
 
-APP_KEY = os.environ["WEBULL_APP_KEY"]
-APP_SECRET = os.environ["WEBULL_APP_SECRET"]
+APP_KEY, APP_SECRET = resolve_webull_credentials()
 
 # Selected Webull trading endpoint
 WEBULL_ENDPOINT = resolve_webull_endpoint()

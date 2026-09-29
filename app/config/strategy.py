@@ -6,6 +6,7 @@ from app.config.webull import WebullSettings
 
 
 class StrategyExitSettings(WebullSettings):
+    dashboard_refresh_interval_seconds: int = Field(default=3600, ge=1, le=2147483, alias="DASHBOARD_REFRESH_INTERVAL_SECONDS")
     live_iron_condor_enabled: bool = Field(default=False, alias="WEBULL_LIVE_IRON_CONDOR_ENABLED")
     live_bearish_stop_loss_enabled: bool = Field(default=True, alias="WEBULL_LIVE_BEARISH_STOP_LOSS_ENABLED")
     live_bullish_daily_limit_usd: float = Field(default=100, ge=0, allow_inf_nan=False, alias="WEBULL_LIVE_BULLISH_DAILY_LIMIT_USD")

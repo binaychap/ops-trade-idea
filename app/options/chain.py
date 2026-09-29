@@ -2,7 +2,6 @@ import logging
 from typing import Any, Dict, List, Tuple
 
 import json
-import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -12,19 +11,13 @@ if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.common.paths import ENV_FILE
-from app.config.webull import resolve_webull_endpoint
+from app.config.webull import resolve_webull_endpoint, resolve_webull_credentials
 from webull.core.client import ApiClient
 from webull.data.data_client import DataClient
 
 load_dotenv(ENV_FILE)
 
-APP_KEY = os.getenv("WEBULL_APP_KEY")
-APP_SECRET = os.getenv("WEBULL_APP_SECRET")
-
-if not APP_KEY or not APP_SECRET:
-    raise RuntimeError(
-        "WEBULL_APP_KEY and WEBULL_APP_SECRET must be set in the environment or .env file."
-    )
+APP_KEY, APP_SECRET = resolve_webull_credentials()
 
 api_client = ApiClient(
     APP_KEY,

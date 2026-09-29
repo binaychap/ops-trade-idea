@@ -50,8 +50,8 @@ def test_trade_and_snapshot_clients_share_selected_host(mode, monkeypatch):
         set_stream_logger=lambda **kwargs: None,
     )
     monkeypatch.setenv('WEBULL_TRADING_MODE', mode)
-    monkeypatch.setenv('WEBULL_APP_KEY', 'test')
-    monkeypatch.setenv('WEBULL_APP_SECRET', 'test')
+    monkeypatch.setenv(f'WEBULL_{mode.upper()}_APP_KEY', 'test')
+    monkeypatch.setenv(f'WEBULL_{mode.upper()}_APP_SECRET', 'test')
     for name in ('_api_client', '_trade_client', '_data_client'):
         monkeypatch.setattr(client, name, None)
     monkeypatch.setattr(client, 'ApiClient', lambda *args: api)
@@ -81,8 +81,8 @@ def test_option_contract_lookup_uses_selected_host(mode, monkeypatch):
         set_stream_logger=lambda **kwargs: None,
     )
     monkeypatch.setenv('WEBULL_TRADING_MODE', mode)
-    monkeypatch.setenv('WEBULL_APP_KEY', 'test')
-    monkeypatch.setenv('WEBULL_APP_SECRET', 'test')
+    monkeypatch.setenv(f'WEBULL_{mode.upper()}_APP_KEY', 'test')
+    monkeypatch.setenv(f'WEBULL_{mode.upper()}_APP_SECRET', 'test')
     monkeypatch.setattr(brackets, 'ApiClient', lambda *args: api)
     monkeypatch.setattr(brackets, 'DataClient', lambda api: SimpleNamespace(
         instrument=SimpleNamespace(get_option_contracts=lambda **kwargs: [])))

@@ -12,8 +12,8 @@ WEBULL_ENDPOINT=api.webull.com
 DRY_RUN=false
 DATABASE_PATH=bot-live.sqlite3
 
-WEBULL_APP_KEY=your-production-app-key
-WEBULL_APP_SECRET=your-production-app-secret
+WEBULL_LIVE_APP_KEY=your-production-app-key
+WEBULL_LIVE_APP_SECRET=your-production-app-secret
 
 WEBULL_LIVE_BULLISH_STOCK_ACCOUNT_NUMBER=your-live-stock-account-number
 WEBULL_LIVE_TOP_BULLISH_ACCOUNT_NUMBER=your-live-bullish-runner-account-number
@@ -43,7 +43,8 @@ daily cap is $100. Credentials and account numbers are placeholders.
 | `WEBULL_ENDPOINT` | Must match the mode; blank selects the matching host automatically. | Automatic |
 | `DRY_RUN` | `true` prevents application submissions; `false` permits orders in the selected environment. | `true` |
 | `DATABASE_PATH` | Use a separate live ledger, shared by all live workers that share a daily budget. | `bot.sqlite3` |
-| `WEBULL_APP_KEY` / `WEBULL_APP_SECRET` | Credentials for the selected environment. | Unset |
+| `WEBULL_LIVE_APP_KEY` / `WEBULL_LIVE_APP_SECRET` | Production credentials, required for live broker access. | Unset |
+| `WEBULL_PAPER_APP_KEY` / `WEBULL_PAPER_APP_SECRET` | Sandbox credentials; blank pair uses legacy `WEBULL_APP_KEY` / `WEBULL_APP_SECRET`. | Unset |
 | `WEBULL_LIVE_BULLISH_STOCK_ACCOUNT_NUMBER` | Live account for main bullish stock entries, manual stock API and morning sells. | Empty |
 | `WEBULL_LIVE_TOP_BULLISH_ACCOUNT_NUMBER` | Live account for the dedicated bullish runner. | Empty |
 | `WEBULL_LIVE_OPTIONS_MARGIN_ACCOUNT_NUMBER` | Live options account for enabled option strategies. | Empty |
@@ -77,8 +78,8 @@ WEBULL_ENDPOINT=api.sandbox.webull.com
 DRY_RUN=false
 DATABASE_PATH=bot.sqlite3
 
-WEBULL_APP_KEY=your-sandbox-app-key
-WEBULL_APP_SECRET=your-sandbox-app-secret
+WEBULL_PAPER_APP_KEY=your-sandbox-app-key
+WEBULL_PAPER_APP_SECRET=your-sandbox-app-secret
 
 WEBULL_PAPER_BULLISH_STOCK_ACCOUNT_NUMBER=your-paper-stock-account-number
 WEBULL_PAPER_TOP_BULLISH_ACCOUNT_NUMBER=your-paper-bullish-runner-account-number
@@ -212,3 +213,66 @@ Set the flag to `true` to permit new live iron-condor entries again, with the
 existing profit/stop bracket behavior. Restart workers after changing it.
 The options daily limit still applies to enabled live option entries such as
 CALLs and PUTs, and to iron condors if re-enabled.
+
+## Test the live Webull connection
+
+Run this from the project root after filling in `WEBULL_LIVE_APP_KEY` and
+`WEBULL_LIVE_APP_SECRET` in `.env`. It requests the live account list without
+printing account details, placing orders, or starting trading workers. It works
+while the market is closed. Exported shell variables take precedence over `.env`.
+
+```bash
+WEBULL_TRADING_MODE=live WEBULL_ENDPOINT=api.webull.com uv run python - <<'PY'
+from app.broker.client import get_trade_client
+from app.broker.errors import describe_webull_error
+
+try:
+    response = get_trade_client().account_v2.get_account_list()
+    print(f"HTTP status: {response.status_code}")
+    if response.status_code == 200:
+        print("SUCCESS: Live Webull account request succeeded.")
+    else:
+        print("FAILED: Live Webull account request was rejected.")
+except Exception as exc:
+    print("FAILED:", describe_webull_error(exc))
+    raise SystemExit(1)
+PY
+```
+
+HTTP 200 confirms live account access; it does not test order permissions.
+A 401 / invalid credentials response means authentication failed; see below.
+Successful dashboard requests and an idle exit worker do not verify Webull access.
+
+## Webull 401 / invalid credentials
+
+If the API starts but Webull client initialization returns `401 UNAUTHORIZED`,
+the broker rejected authentication before order submission. For live mode, use
+production `WEBULL_LIVE_APP_KEY` and `WEBULL_LIVE_APP_SECRET` with `api.webull.com`; for
+paper mode, use sandbox credentials with `api.sandbox.webull.com`. Account-number
+settings select accounts after authentication and cannot fix invalid API keys.
+Check for stale exported variables overriding `.env`, then restart all workers.
+Do not post credentials in logs or support messages.
+
+The live cash exit worker checks the local ledger before initializing the SDK.
+Without pending cash exit jobs it makes no broker connection. With pending jobs,
+an initialization 401 leaves exits unmonitored and retries after 60 seconds with
+an actionable log message. Correcting the credentials is still required; this
+retry behavior does not resolve authentication or verify broker connectivity.
+
+Webull credentials are selected by `WEBULL_TRADING_MODE`: live requires
+`WEBULL_LIVE_APP_KEY` and `WEBULL_LIVE_APP_SECRET`; paper uses
+`WEBULL_PAPER_APP_KEY` and `WEBULL_PAPER_APP_SECRET`. When both paper fields
+are blank, legacy `WEBULL_APP_KEY` / `WEBULL_APP_SECRET` remain a paper-only
+fallback. Partial pairs are rejected. Restart processes after changes.
+
+## Dashboard refresh
+
+```ini
+DASHBOARD_REFRESH_INTERVAL_SECONDS=3600
+```
+
+The dashboard loads immediately, then auto-refreshes hourly by default while
+visible and auto-refresh is enabled. Returning to a hidden tab refreshes only
+when the interval has elapsed. The Refresh button always allows a manual update.
+This controls local ledger reads, independently of feed polling and exit workers.
+Restart the app and reload the browser after changing this setting.

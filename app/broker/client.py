@@ -1,13 +1,12 @@
 from app.common.paths import ENV_FILE
 """Shared paper/live client, account lookup, and order identifiers."""
 
-import os
 import logging
 import uuid
 
 from dotenv import load_dotenv
 import sys
-from app.config.webull import resolve_webull_endpoint
+from app.config.webull import resolve_webull_endpoint, resolve_webull_credentials
 from webull.core.client import ApiClient
 from webull.trade.trade_client import TradeClient
 
@@ -38,8 +37,7 @@ def get_api_client():
     if _api_client is not None:
         return _api_client
 
-    app_key = os.environ["WEBULL_APP_KEY"]
-    app_secret = os.environ["WEBULL_APP_SECRET"]
+    app_key, app_secret = resolve_webull_credentials()
 
     api_client = ApiClient(
         app_key,

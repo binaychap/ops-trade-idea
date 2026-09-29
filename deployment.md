@@ -35,7 +35,7 @@ Use **Compute → Instances → Create instance** in your home region.
 
 | Setting                                   | Suggested choice                                |
 | ----------------------------------------- | ----------------------------------------------- |
-| Name                                      | `ops-trade-idea`                               |
+| Name                                      | `ops-trade-idea`                                |
 | Image                                     | Oracle Linux 9                                  |
 | Shape                                     | Always Free-eligible `VM.Standard.A1.Flex`      |
 | CPU / memory                              | Start with 1 OCPU and 4 GB RAM                  |
@@ -317,6 +317,8 @@ The app reads `.env` from its working directory.
 sudo systemctl daemon-reload
 sudo systemctl enable --now ops-trade-idea
 sudo systemctl status ops-trade-idea
+sudo systemctl stop ops-trade-idea
+sudo systemctl start ops-trade-idea
 sudo journalctl -u ops-trade-idea -n 100 --no-pager
 ```
 

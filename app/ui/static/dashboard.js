@@ -77,16 +77,24 @@ function renderDetail(){
  orders.append(text('p','These are saved observations, not a fresh broker query. The worker may have newer information on its next cycle.','detail-copy'));
 }
 function openDetail(key){state.selected=key;renderDetail();$('detail').showModal();}
+let refreshTimer;
+let refreshIntervalMs=3600000;
+let nextRefreshAt=0;
+function scheduleRefresh(){
+ clearTimeout(refreshTimer);
+ nextRefreshAt=Date.now()+refreshIntervalMs;
+ refreshTimer=setTimeout(()=>{if($('auto-refresh').checked&&!document.hidden)refresh();},refreshIntervalMs);
+}
 async function refresh(){
  if(state.loading)return;state.loading=true;$('refresh').disabled=true;
- try{const response=await fetch('/api/trades',{cache:'no-store'});if(!response.ok)throw new Error('Unable to read the trade ledger.');const data=await response.json();if(!Array.isArray(data.trades))throw new Error('Unexpected ledger response.');state.data=data;$('error').hidden=true;render();}
+ try{const response=await fetch('/api/trades',{cache:'no-store'});if(!response.ok)throw new Error('Unable to read the trade ledger.');const data=await response.json();if(!Array.isArray(data.trades))throw new Error('Unexpected ledger response.');state.data=data;const seconds=data.settings?.dashboard_refresh_interval_seconds;if(Number.isInteger(seconds)&&seconds>0&&seconds<=2147483)refreshIntervalMs=seconds*1000;$('auto-refresh-label').textContent=`Auto-refresh · ${refreshIntervalMs%3600000===0?refreshIntervalMs/3600000+'h':refreshIntervalMs/1000+'s'}`;$('error').hidden=true;render();}
  catch(error){$('error').textContent=`${error.message} ${state.data?'Showing the last successful snapshot.':'Try refreshing again.'}`;$('error').hidden=false;$('freshness').textContent='Refresh failed';if(!state.data){$('empty').querySelector('h3').textContent='Trade activity unavailable';$('empty').querySelector('p').textContent='The ledger could not be loaded. Use Refresh to try again.';}}
- finally{state.loading=false;$('refresh').disabled=false;}
+ finally{state.loading=false;$('refresh').disabled=false;scheduleRefresh();}
 }
 $('refresh').addEventListener('click',refresh);
 for(const id of ['search','idea-filter','exit-filter','attention-filter'])$(id).addEventListener('input',()=>{state.page=1;renderRows();});
 $('previous').addEventListener('click',()=>{state.page--;renderRows();});$('next').addEventListener('click',()=>{state.page++;renderRows();});
 $('close-detail').addEventListener('click',()=>$('detail').close());$('detail').addEventListener('close',()=>{state.selected=null;});
-setInterval(()=>{if($('auto-refresh').checked&&!document.hidden)refresh();},15000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&$('auto-refresh').checked)refresh();});
+$('auto-refresh').addEventListener('change',()=>{if($('auto-refresh').checked&&Date.now()>=nextRefreshAt)refresh();});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&$('auto-refresh').checked&&Date.now()>=nextRefreshAt)refresh();});
 refresh();

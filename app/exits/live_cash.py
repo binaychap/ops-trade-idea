@@ -156,13 +156,27 @@ def start_cash_exit_worker(settings):
 
     def run():
         from app.broker.client import get_trade_client
+        from app.broker.errors import describe_webull_error
         while not stop.is_set():
+            retry_seconds = 10
             try:
-                scheduler = CashExitScheduler(ledger, CashStockExecution(get_trade_client()))
-                scheduler.run_once()
-            except Exception:
-                logging.getLogger(__name__).exception('Live cash exit worker failed; retrying')
-            stop.wait(10)
+                # SDK construction authenticates over the network. Idle workers
+                # need no client; poll the local ledger for new jobs instead.
+                if any(job.get('kind') == 'live_cash' for job in ledger.exit_jobs()):
+                    scheduler = CashExitScheduler(ledger, CashStockExecution(get_trade_client()))
+                    scheduler.run_once()
+            except Exception as exc:
+                if str(getattr(exc, 'http_status', '')) == '401':
+                    retry_seconds = 60
+                    logging.getLogger(__name__).error(
+                        'Live cash exits cannot authenticate: check production WEBULL_LIVE_APP_KEY '
+                        'and WEBULL_LIVE_APP_SECRET for the selected endpoint, then restart. '
+                        'Exits are not being monitored; retrying in 60s. %s',
+                        describe_webull_error(exc),
+                    )
+                else:
+                    logging.getLogger(__name__).exception('Live cash exit worker failed; retrying')
+            stop.wait(retry_seconds)
 
     thread = threading.Thread(target=run, name='live-cash-exits', daemon=True)
     thread.start()

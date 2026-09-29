@@ -1,3 +1,42 @@
+## Configurable dashboard refresh (2026-09-28)
+
+DASHBOARD_REFRESH_INTERVAL_SECONDS defaults to 3600 and is set in local .env and
+.env.example. Shared settings accept it across runners; /api/trades exposes only
+the interval alongside existing public settings. Browser schedules refreshes
+using this value, updates the checkbox label, and only refreshes on tab return
+if due. Initial load and manual refresh remain immediate. Feed and exit polling
+are unaffected. run.md documents restart/reload. No broker calls made.
+
+## Live connection test documentation (2026-09-28)
+
+run.md includes a standalone read-only live account-list test using the shared
+client and sanitized error formatter. Documents credentials, shell precedence,
+closed-market use and the distinction between account access and order permissions.
+Documentation only; test command was not executed against Webull.
+
+## Separate Webull credentials (2026-09-28)
+
+All SDK construction paths now select WEBULL_LIVE_APP_KEY/APP_SECRET or
+WEBULL_PAPER_APP_KEY/APP_SECRET by trading mode through a shared resolver.
+Live never falls back to legacy credentials; paper uses WEBULL_APP_KEY/SECRET
+only when both paper-specific fields are blank. Partial pairs fail closed.
+Credential settings are excluded from repr. Local .env adds blank environment
+pairs without moving or changing existing credentials; user must fill live keys.
+run.md and .env.example document selection; restart required for cached clients.
+Validation: 295 tests passed with dotenv isolated; compilation and diff checks
+passed. No broker requests, orders, credential generation or service restarts.
+
+## Cash worker authentication startup fix (2026-09-28)
+
+Reported live startup 401 occurred inside SDK TradeClient initialization before
+order submission. Cash worker now checks for pending live_cash jobs before SDK
+construction; idle/non-cash ledgers make no broker calls. Initialization HTTP 401
+uses sanitized actionable logging and 60-second retry instead of 10-second stack
+trace repetition. Pending jobs remain; no authentication bypass or order replay.
+Production credentials versus environment remain an operator configuration issue;
+actual cause of invalid credentials was not verified. No .env credentials read or
+changed, no broker calls or service restarts. run.md includes troubleshooting.
+
 ## Consolidated live configuration reference (2026-09-28)
 
 run.md now includes all WEBULL_LIVE_* fields in one example, a settings/defaults
