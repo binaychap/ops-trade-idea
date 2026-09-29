@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.config.strategy import bearish_stop_loss_enabled
+from app.config.strategy import bearish_stop_loss_enabled, iron_condor_enabled
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -40,6 +40,10 @@ def submit_paper_order(decision: Any, settings: Any, fingerprint: str, payload: 
 
     if d.get("action") == "skip":
         return {"skipped": True, "reason": d.get("rationale", "Decision skipped")}
+    if (not iron_condor_enabled(settings)
+            and (d.get("strategy") == "iron_condor"
+                 or getattr(payload, "direction", None) == "neutral")):
+        return {"skipped": True, "reason": "Iron-condor trading is disabled in live mode"}
     if payload is not None and getattr(payload, "direction", None) == "neutral":
         if d.get("action") != "buy" or d.get("strategy") != "iron_condor":
             return {"skipped": True, "reason": "Neutral execution requires an iron_condor decision"}

@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP
 from typing import Any
+from app.config.strategy import iron_condor_enabled
 
 from app.broker.client import get_data_client, get_trade_client, new_id
 from app.broker.quotes import QuoteError
@@ -147,6 +148,8 @@ class IronCondorOptionExecutor:
                quantity=1, wing_width=None, trade_client=None, profit_percent=10,
                stop_loss_percent=5, exit_time_in_force="GTC", before_submit=None, now=None,
                quote_max_age_seconds=60):
+        if not iron_condor_enabled():
+            raise CondorValidationError("Iron-condor trading is disabled in live mode")
         requested_now = now
         now = now or datetime.now(UTC)
         ref, budget = number(reference_price), number(max_risk_usd)

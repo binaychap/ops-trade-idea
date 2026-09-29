@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.config.strategy import bearish_stop_loss_enabled
+from app.config.strategy import bearish_stop_loss_enabled, iron_condor_enabled
 
 import hashlib
 import json
@@ -1040,6 +1040,9 @@ def submit_paper_order(
     fingerprint: str,
     payload: TradeIdea | None = None,
 ) -> dict[str, Any]:
+    if (not iron_condor_enabled(settings)
+            and (decision.strategy == "iron_condor" or getattr(payload, "direction", None) == "neutral")):
+        return {"skipped": True, "reason": "Iron-condor trading is disabled in live mode"}
     if payload is not None and payload.direction in {"neutral", "bearish"}:
         from app.execution.submitter import submit_paper_order as submit_shared_order
         return submit_shared_order(decision, settings, fingerprint, payload)

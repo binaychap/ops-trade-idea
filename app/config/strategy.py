@@ -1,9 +1,12 @@
 """Shared strategy exit percentages; values are percentages, not fractions."""
-from pydantic import Field, model_validator
+import os
+
+from pydantic import Field, TypeAdapter, model_validator
 from app.config.webull import WebullSettings
 
 
 class StrategyExitSettings(WebullSettings):
+    live_iron_condor_enabled: bool = Field(default=False, alias="WEBULL_LIVE_IRON_CONDOR_ENABLED")
     live_bearish_stop_loss_enabled: bool = Field(default=True, alias="WEBULL_LIVE_BEARISH_STOP_LOSS_ENABLED")
     live_bullish_daily_limit_usd: float = Field(default=100, ge=0, allow_inf_nan=False, alias="WEBULL_LIVE_BULLISH_DAILY_LIMIT_USD")
     live_options_daily_limit_usd: float = Field(default=0, ge=0, allow_inf_nan=False, alias="WEBULL_LIVE_OPTIONS_DAILY_LIMIT_USD")
@@ -67,3 +70,12 @@ def bullish_stock_account_id(module, settings):
 def bearish_stop_loss_enabled(settings):
     return (getattr(settings, 'webull_trading_mode', 'paper') != 'live'
             or getattr(settings, 'live_bearish_stop_loss_enabled', True))
+
+
+def iron_condor_enabled(settings=None):
+    if settings is not None:
+        return (getattr(settings, 'webull_trading_mode', 'paper') != 'live'
+                or getattr(settings, 'live_iron_condor_enabled', False))
+    if os.getenv('WEBULL_TRADING_MODE', 'paper') != 'live':
+        return True
+    return TypeAdapter(bool).validate_python(os.getenv('WEBULL_LIVE_IRON_CONDOR_ENABLED', 'false'))

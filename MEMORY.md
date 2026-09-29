@@ -1,3 +1,34 @@
+## Consolidated live configuration reference (2026-09-28)
+
+run.md now includes all WEBULL_LIVE_* fields in one example, a settings/defaults
+table, switch interactions, and date-based daily allowance reset behavior. The
+example uses $100 per stock and a $1,000 daily cap, distinguished from the $100
+code-default daily cap. Account/credential examples remain placeholders.
+Documentation only; no .env, runtime or broker changes.
+
+## Live iron-condor configuration flag (2026-09-28)
+
+WEBULL_LIVE_IRON_CONDOR_ENABLED now controls the earlier live-only skip. Validated
+bool defaults false; .env and .env.example set false. Shared/alternate submitters
+use settings, direct executor uses the same process environment as SDK clients.
+True restores the existing live condor entry/profit/stop path; paper ignores the
+flag. No orders or positions are changed by toggling it. run.md documents the
+flag and required worker restart. No services restarted or broker calls made.
+Validation: 288 tests pass with local dotenv isolated; compilation, focused lint
+and diff checks pass. Local flag verified without displaying other .env values.
+
+## Live iron condors disabled (2026-09-28)
+
+User superseded the neutral stop-loss-toggle request with skipping live iron
+condors entirely. Shared and alternate submitters return skipped before dry-run,
+account lookup, budget reservation or broker submission for live neutral payloads
+or iron_condor strategy labels (including Crush labels). Direct condor executor
+also rejects live process mode before data access. Paper behavior and existing
+broker orders/positions are unchanged; no neutral stop toggle was added. Restart
+workers for this code change. .env was not changed.
+Validation: 284 tests passed with local dotenv isolated; compilation, focused
+lint and diff checks passed. No broker requests or service restarts.
+
 ## Live bearish stop-loss toggle (2026-09-28)
 
 WEBULL_LIVE_BEARISH_STOP_LOSS_ENABLED is a validated bool defaulting true; local
