@@ -19,8 +19,8 @@ class Settings(StrategyExitSettings):
     optionomics_poll_enabled: bool = Field(default=True, alias="OPTIONOMICS_POLL_ENABLED")
     optionomics_poll_interval_seconds: int = Field(default=600, ge=1, alias="OPTIONOMICS_POLL_INTERVAL_SECONDS")
 
-    webull_app_key: str | None = Field(default=None, alias="WEBULL_APP_KEY")
-    webull_app_secret: str | None = Field(default=None, alias="WEBULL_APP_SECRET")
+    # Webull credentials live on WebullSettings (inherited via StrategyExitSettings):
+    # WEBULL_APP_KEY/SECRET, WEBULL_PAPER_APP_KEY/SECRET, WEBULL_LIVE_APP_KEY/SECRET.
 
     next_day_exit_enabled: bool = Field(default=False, alias="NEXT_DAY_EXIT_ENABLED")
     next_day_exit_time: str = Field(default="09:35", pattern=r"^(09:(3[0-9]|[45][0-9])|1[0-5]:[0-5][0-9])$", alias="NEXT_DAY_EXIT_TIME")

@@ -119,6 +119,17 @@ no broker requests or service restarts. Local mode remains live as requested ear
 Validation: 228 tests passed with local dotenv loading disabled in the test
 harness; 20 focused routing tests passed. Compilation and focused lint passed.
 
+## Webull credential consolidation (2026-09-29)
+
+`WEBULL_APP_KEY`/`SECRET` were declared on both `Settings`
+(`app/config/settings.py`) and `WebullSettings` (`app/config/webull.py`).
+Consolidated to `WebullSettings` only — the paper/live variants
+(`WEBULL_PAPER_APP_KEY`/`SECRET`, `WEBULL_LIVE_APP_KEY`/`SECRET`) and
+`resolve_webull_credentials()` already lived there, and `Settings` inherits
+them via `StrategyExitSettings`, so `settings.webull_app_key` keeps working
+(e.g. `app/options/runner.py`). Env names are UPPERCASE; lowercase `.env`
+entries are silently ignored by pydantic-settings.
+
 ## Webull live environment routing (2026-09-28)
 
 `app/config/webull.py` centralizes paper/live host resolution. New
