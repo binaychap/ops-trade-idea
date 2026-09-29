@@ -1,3 +1,76 @@
+## Run configuration guide (2026-09-28)
+
+run.md documents live, sandbox and dry-run configuration combinations, separate
+credentials/accounts/databases, application launch commands and restart behavior.
+Examples contain placeholders only. Documentation change; no local environment
+values, services or broker orders changed.
+
+## Live bullish cash entries and managed exits (2026-09-28)
+
+app/execution/live_stock.py submits live-only automated bullish stock entries as
+NORMAL MARKET DAY CORE AMOUNT orders. WEBULL_LIVE_BULLISH_AMOUNT_USD defaults to
+100 and is set to 100 in .env/.env.example. Main bullish stocks and dedicated
+bullish runner use it; paper, option branches and manual quantity API tickets
+retain their previous behavior. Fresh quotes determine a cent-exact split into
+cash orders each >=$5 and below one share. $30 uses four $25 orders; $100 uses two
+$50 orders. Quotes at/below $5 cannot meet both rules and skip. All planned cash
+amounts sum to the configured budget, but interrupted/failed plans may invest less.
+Each leg is persisted before submission; unsent legs after interruption are never
+replayed. Worker reconciles each attempted leg and aggregates fills/weighted prices.
+Exits sell whole shares then fractional remainder separately. Cash worker order
+detail calls use process-shared 1.05-second pacing (Webull limit 2/2s).
+Amount must fit configured/decision budgets. Dry runs are broker-free previews.
+
+Cash orders use app-managed percentage exits based on actual average fills, not
+broker brackets. app/exits/live_cash.py runs every 10 seconds under live non-dry-run
+FastAPI/continuous bullish runner processes. Requires running app and valid fresh
+quotes during XNYS hours. Live --once is rejected. Positions must be flat before
+entry. Permanent entry reservation and kind=live_cash exit jobs precede broker
+submission; ambiguous results never replay. Actual fractional fills are retained
+as Decimal; entry partials cancel before exit, confirmed terminal partial sells
+can sell remaining fills. Next-day settings remain supported; morning sells
+delegate cash jobs instead of marking them complete on submission. Legacy exit
+scheduler skips cash jobs; all share existing exit-worker file lock. No schema
+migration. Strict broker cash response parsing remains unverified live. No broker
+requests/orders or service restarts. README records supported scope and limits.
+Validation: 260 tests pass with local dotenv loading isolated, including 32 cash
+entry/exit tests covering split budgets, unique IDs, interrupted plans and combined
+position exits. Compilation, focused Ruff and diff whitespace checks pass.
+
+## Environment-specific Webull accounts (2026-09-28)
+
+Shared strategy settings now select WEBULL_PAPER_ or WEBULL_LIVE_ variants of
+BULLISH_STOCK_ACCOUNT_NUMBER, TOP_BULLISH_ACCOUNT_NUMBER and
+OPTIONS_MARGIN_ACCOUNT_NUMBER according to WEBULL_TRADING_MODE. Legacy account
+fields are paper-only fallbacks; missing live accounts block the corresponding
+submission. Main stocks, manual API, morning sells, bullish runner and option
+submission consume the resolved fields. Alternate CALL execution uses the explicit
+options account in live mode; live API account reads disallow first-account fallback.
+Local .env preserves existing account values under paper fields and provides blank
+live fields; user will enter production numbers. No account values recorded here,
+no broker requests or service restarts. Local mode remains live as requested earlier.
+Validation: 228 tests passed with local dotenv loading disabled in the test
+harness; 20 focused routing tests passed. Compilation and focused lint passed.
+
+## Webull live environment routing (2026-09-28)
+
+`app/config/webull.py` centralizes paper/live host resolution. New
+`WEBULL_TRADING_MODE` defaults to paper; live selects api.webull.com. Optional
+WEBULL_ENDPOINT must match the selected mode; blank selects automatically.
+All SDK creation sites (shared trading/snapshot client, option brackets/chain,
+alternate runner and standalone examples) use this resolver. Shared strategy
+settings inherit mode/host validation. DRY_RUN remains independent; low-level
+standalone examples have no dry-run gate. Restart processes after config changes.
+Use a separate DATABASE_PATH per environment because saved orders/reservations
+and exit jobs are not environment-namespaced. Local .env was not changed.
+Live routing is tested with fake SDK clients only; no production requests or
+orders were made. Existing sizing/retry/morning-sell limitations remain.
+Validation: 220 tests passed with main/alternate Settings dotenv loading disabled
+in the test harness; all 14 environment tests passed after adding two contract
+lookup cases. Normal suite/startup is blocked by an unrelated TFE_API_TOKEN key
+in the shared local .env, rejected by strict settings; its value was not recorded.
+Compilation, focused lint and diff whitespace checks passed.
+
 # Ops Trade Idea — project memory
 
 ## GCP free-tier Terraform deployment (2026-09-26)

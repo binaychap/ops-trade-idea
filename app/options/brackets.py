@@ -7,6 +7,7 @@ import logging
 import math
 from datetime import UTC, datetime, timedelta
 from app.options.expiration import resolve_option_expiry
+from app.config.webull import resolve_webull_endpoint
 from webull.core.client import ApiClient
 from webull.data.data_client import DataClient
 
@@ -62,7 +63,7 @@ def _find_valid_contract(symbol: str, desired_expiration: str | None, desired_st
     symbol = str(symbol or "").upper()
     app_key = os.getenv("WEBULL_APP_KEY")
     app_secret = os.getenv("WEBULL_APP_SECRET")
-    endpoint = os.getenv("WEBULL_ENDPOINT") or "api.sandbox.webull.com"
+    endpoint = resolve_webull_endpoint()
     if not app_key or not app_secret:
         raise RuntimeError("WEBULL credentials not configured for contract validation")
 

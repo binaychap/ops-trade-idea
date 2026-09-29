@@ -37,7 +37,7 @@ class MarketClosed(Exception):
 
 
 class BullishSettings(StrategyExitSettings):
-    account_number: str = Field(default='', alias='TOP_BULLISH_ACCOUNT_NUMBER')
+    account_number: str = Field(default='', alias='TOP_BULLISH_ACCOUNT_NUMBER', repr=False)
     dry_run: bool = Field(default=True, alias='DRY_RUN')
     database_path: str = Field(default='bot.sqlite3', alias='DATABASE_PATH')
     max_notional_usd: float = Field(default=250, gt=0, allow_inf_nan=False, alias='MAX_NOTIONAL_USD')
@@ -56,7 +56,11 @@ class MainTopBullish:
                  market_open=None):
         self.settings = settings or BullishSettings()
         self.ledger = BullishLedger(self.settings.database_path)
-        self.quote_provider = quote_provider or current_stock_quote
+        self.quote_provider = quote_provider or (
+            (lambda s: current_stock_quote(s, max_age_seconds=60))
+            if getattr(self.settings, 'webull_trading_mode', 'paper') == 'live'
+            else current_stock_quote
+        )
         self.feed = feed
         self.stock_loader = stock_loader or _load_webull_stock_module
         if market_open is None:
@@ -69,6 +73,8 @@ class MainTopBullish:
         next_run = time.monotonic()
         cycle = 0
         logger.info('Bullish scheduler started: interval=300s; press Ctrl+C to stop')
+        from app.exits.live_cash import start_cash_exit_worker
+        worker = start_cash_exit_worker(getattr(self, 'settings', None))
         try:
             while True:
                 cycle += 1
@@ -91,6 +97,10 @@ class MainTopBullish:
                 time.sleep(next_run - now)
         except KeyboardInterrupt:
             logger.info('Bullish-flow scheduler stopped')
+        finally:
+            if worker:
+                worker[0].set()
+                worker[1].join(timeout=5)
 
     def run(self, *, limit=10):
         """Process feed symbols once using fresh Webull quotes as limit prices."""
@@ -126,6 +136,42 @@ class MainTopBullish:
             raise ValueError(f'{symbol}: invalid total_premium')
         if isinstance(count, bool) or not isinstance(count, int) or count < 0:
             raise ValueError(f'{symbol}: invalid trade_count')
+        if getattr(self.settings, 'webull_trading_mode', 'paper') == 'live':
+            from app.execution.live_stock import submit_live_stock
+            normalized = {**item, 'symbol': symbol, 'total_premium': premium, 'trade_count': count}
+
+            def record_cash_intent(tracking):
+                if not self.ledger.claim(trade_id, normalized, {'entrust_type': 'AMOUNT',
+                        'total_cash_amount': str(self.settings.live_bullish_amount_usd)}):
+                    raise ValueError('Trade or symbol already present')
+                self.ledger.update(trade_id, 'submitting', tracking=tracking)
+
+            def resolve_cash_account():
+                if not self.settings.account_number.strip():
+                    raise ValueError('Set WEBULL_LIVE_TOP_BULLISH_ACCOUNT_NUMBER')
+                return self.stock_loader().get_account_id(account_number=self.settings.account_number.strip())
+
+            try:
+                result = submit_live_stock(
+                    symbol, self.settings, 'bullish:' + trade_id,
+                    account_resolver=resolve_cash_account,
+                    quote_provider=self.quote_provider, market_open=self.market_open,
+                    before_submit=record_cash_intent,
+                )
+                if result.get('skipped'):
+                    if self.ledger.contains(trade_id, symbol):
+                        self.ledger.update(trade_id, 'skipped', error=result['reason'])
+                    return {'symbol': symbol, 'status': 'skipped', 'reason': result['reason']}
+                if self.settings.dry_run:
+                    if not self.ledger.claim(trade_id, normalized, result['order']):
+                        return {'symbol': symbol, 'status': 'skipped', 'reason': 'Trade or symbol already present'}
+                self.ledger.update(trade_id, result['status'], order=result)
+                return result
+            except Exception as exc:
+                if self.ledger.contains(trade_id, symbol):
+                    self.ledger.update(trade_id, 'submission_unknown', error=type(exc).__name__)
+                raise
+
         try:
             quote = self.quote_provider(symbol)
         except QuoteError as exc:
@@ -195,6 +241,8 @@ if __name__ == '__main__':
         parser.error('--limit must be positive')
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
     runner = MainTopBullish()
+    if args.once and runner.settings.webull_trading_mode == 'live' and not runner.settings.dry_run:
+        parser.error('Live cash trading requires continuous execution for managed exits; omit --once')
     if args.once:
         print(json.dumps(runner.run(limit=args.limit), indent=2), flush=True)
     else:

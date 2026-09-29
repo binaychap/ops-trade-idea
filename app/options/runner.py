@@ -23,6 +23,7 @@ from app.feeds.optionomics_client import fetch_trade_ideas
 from fastapi import FastAPI
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import SettingsConfigDict
+from app.config.webull import resolve_webull_endpoint
 from app.config.strategy import StrategyExitSettings, exit_percentages, options_margin_account_id
 from webull.core.client import ApiClient
 from webull.data.data_client import DataClient
@@ -65,7 +66,6 @@ class Settings(StrategyExitSettings):
 
     webull_app_key: str | None = Field(default=None, alias="WEBULL_APP_KEY")
     webull_app_secret: str | None = Field(default=None, alias="WEBULL_APP_SECRET")
-    webull_endpoint: str = Field(default="api.sandbox.webull.com", alias="WEBULL_ENDPOINT")
 
     database_path: str = Field(default="bot.sqlite3", alias="DATABASE_PATH")
 
@@ -344,7 +344,10 @@ def fetch_webull_option_chain(
     if not app_key or not app_secret:
         return None
 
-    endpoint = (settings.webull_endpoint if settings else None) or os.getenv("WEBULL_ENDPOINT") or "api.sandbox.webull.com"
+    endpoint = resolve_webull_endpoint(
+        getattr(settings, "webull_trading_mode", None),
+        getattr(settings, "webull_endpoint", None),
+    )
     api_client = ApiClient(app_key, app_secret, "us")
     api_client.add_endpoint("us", endpoint)
     api_client.set_stream_logger(stream=sys.stdout)
@@ -1002,7 +1005,10 @@ def get_webull_valid_expiry(
     if not app_key or not app_secret:
         return None
 
-    endpoint = (settings.webull_endpoint if settings else None) or os.getenv("WEBULL_ENDPOINT") or "api.sandbox.webull.com"
+    endpoint = resolve_webull_endpoint(
+        getattr(settings, "webull_trading_mode", None),
+        getattr(settings, "webull_endpoint", None),
+    )
     api_client = ApiClient(app_key, app_secret, "us")
     api_client.add_endpoint("us", endpoint)
     api_client.set_stream_logger(stream=sys.stdout)
@@ -1050,7 +1056,7 @@ def submit_paper_order(
 
     webull_module = _load_webull_combo_module()
     account_id = (options_margin_account_id(webull_module, settings)
-                  if decision.action == "sell_short" else webull_module.get_account_id())
+                  if decision.action == "sell_short" or settings.webull_trading_mode == "live" else webull_module.get_account_id())
 
     reference_level = None
     if payload is not None:

@@ -5,6 +5,7 @@ import json
 
 from dotenv import load_dotenv
 import sys
+from app.config.webull import resolve_webull_endpoint
 from webull.core.client import ApiClient
 from webull.trade.trade_client import TradeClient
 
@@ -17,8 +18,8 @@ load_dotenv(ENV_FILE)
 APP_KEY = os.environ["WEBULL_APP_KEY"]
 APP_SECRET = os.environ["WEBULL_APP_SECRET"]
 
-# Webull paper/sandbox trading endpoint
-WEBULL_ENDPOINT = "api.sandbox.webull.com"
+# Selected Webull trading endpoint
+WEBULL_ENDPOINT = resolve_webull_endpoint()
 
 
 # ==========================================================

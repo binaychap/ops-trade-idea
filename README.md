@@ -700,3 +700,103 @@ packages; shared option helpers use standard imports rather than file loaders.
 The older alternate options runner lives at `app.options.runner`.
 Repository `.env` discovery and dashboard asset URLs are unchanged. Database paths,
 schemas and strategy behavior are unchanged by this reorganization.
+
+## Webull paper and live environments
+
+`WEBULL_TRADING_MODE=paper` is the default. Set `WEBULL_TRADING_MODE=live`
+to select production for orders, accounts, snapshots and option-chain lookups.
+`WEBULL_ENDPOINT` may be blank (automatic) or must match the mode exactly:
+`api.sandbox.webull.com` for paper, `api.webull.com` for live. Conflicting hosts
+or unknown modes raise an error. Hosts follow the
+[Webull environment documentation](https://developer.webull.com/apis/docs/sdk/).
+
+Example live configuration:
+
+```dotenv
+WEBULL_TRADING_MODE=live
+WEBULL_ENDPOINT=api.webull.com
+WEBULL_APP_KEY=your-production-app-key
+WEBULL_APP_SECRET=your-production-app-secret
+DRY_RUN=true
+DATABASE_PATH=bot-live.sqlite3
+```
+
+Configure the production account numbers in `.env`:
+
+```dotenv
+WEBULL_LIVE_BULLISH_STOCK_ACCOUNT_NUMBER=
+WEBULL_LIVE_TOP_BULLISH_ACCOUNT_NUMBER=
+WEBULL_LIVE_OPTIONS_MARGIN_ACCOUNT_NUMBER=
+```
+
+The fields select the main stock/API/morning-sell account, dedicated bullish
+runner account, and PUT/iron-condor (also alternate CALL runner) account,
+respectively. Fill in each account used by your enabled strategies. Live mode
+never falls back to legacy or paper account fields. Matching `WEBULL_PAPER_`
+fields select paper accounts; the original unprefixed account settings remain
+paper-only fallbacks. Account numbers must match exactly one broker account. Use separate paper/live database paths: saved reservations,
+order IDs and exit jobs are not namespaced by environment. Do not reuse a paper
+ledger for live workers. Restart all application and runner processes after
+changing mode, credentials, accounts or database path; SDK clients and settings
+are cached for the process lifetime.
+
+`DRY_RUN=true` keeps application order submission disabled even in live mode.
+Set `DRY_RUN=false` to enable real orders through the application workers/API.
+Standalone low-level order examples do not implement the application's dry-run
+gate and can submit when executed. Existing strategy, sizing, retry and exit
+behavior is unchanged; switching environments does not resolve the budget,
+ambiguous-submission retry, or morning-exit reconciliation gaps.
+
+## Live bullish stock cash orders
+
+`WEBULL_LIVE_BULLISH_AMOUNT_USD=100` sets the cash amount requested per automated
+live bullish stock entry. The main Optionomics bullish stock flow and dedicated
+bullish runner use `NORMAL / MARKET / DAY / CORE` orders with
+`entrust_type=AMOUNT`. Cash amounts across the planned orders sum to $100. No
+quantity is estimated or sent: Webull determines the filled fractional shares. The setting does not change
+paper trading, bearish PUTs, neutral iron condors, the alternate CALL runner, or
+explicit quantity tickets submitted through the manual trading API.
+
+The requested amount must fit MAX_NOTIONAL_USD (and the main decision budget).
+Webull documents each cash order for less than one share and a $5 fractional
+minimum. A fresh quote is used to split the budget into cent-exact cash orders:
+$200/share uses one $100 order; $100/share uses two $50 orders; $30/share uses
+four $25 orders. Each individual order is at least $5 and below the quoted share
+price. If no such split exists (including quotes at/below $5 for a $100 budget),
+the stock is skipped. Broker eligibility/permissions and price changes still
+apply. The requested total is $100, not a guarantee of full fills or an all-in
+debit including fees. See [Webull stock order rules](https://developer.webull.com/apis/docs/trade-api/stock/).
+
+Each cash leg is persisted before its own broker request. If the market closes,
+a request fails or the process stops mid-plan, unsent legs are abandoned rather
+than replayed. This can leave less than $100 invested; attempted legs still need
+reconciliation. All confirmed entry fills contribute to a weighted average entry
+price for exits. Sell orders close whole shares first, then the fractional
+remainder, reconciling each before sending the next. Production order-detail
+requests from cash workers are paced to respect the documented query limit;
+large plans can make a reconciliation cycle longer than the 10-second interval.
+
+Fractional entries have **app-managed exits, not broker-held brackets**. A worker
+runs every 10 seconds during an XNYS regular session, tracks confirmed fills and
+uses the actual average fill price for the configured bullish profit/stop
+percentages. Triggers submit a market sell of the remaining confirmed shares;
+execution price is not guaranteed. Fresh quote failures defer price exits.
+Configured next-day deadlines and morning-sell requests also use this worker.
+Partially filled entries are cancelled before liquidating their confirmed fills.
+
+Keep either the FastAPI service or continuous bullish runner running with the
+same live database. Live non-dry-run `--once` is rejected because it would stop
+exit monitoring. Application outages, closed sessions or broker/quote failures
+can delay exits. Existing paper bracket/exit behavior remains unchanged.
+
+Entries require a flat position and no active exit job for that account/symbol.
+Order intent and client IDs are persisted before submission. An ambiguous entry
+or sell response is reconciled by its saved ID; it is never blindly retried.
+Missing orders require reconciliation, not deletion of reservations. Confirmed
+terminal partial sells can submit only the unfilled remainder. Cash jobs are
+stored in `scheduled_stock_exits` with `kind=live_cash`; the regular bracket
+scheduler leaves them to the cash worker. All workers share the database exit
+lock. `DRY_RUN=true` previews the cash request without broker calls, reservations,
+or live quote/eligibility validation; the exact split is deferred until a fresh
+quote is available. Tests use fake clients; live acceptance and
+broker response fields have not been verified with a real order.

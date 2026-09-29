@@ -21,9 +21,6 @@ class Settings(StrategyExitSettings):
 
     webull_app_key: str | None = Field(default=None, alias="WEBULL_APP_KEY")
     webull_app_secret: str | None = Field(default=None, alias="WEBULL_APP_SECRET")
-    webull_endpoint: str = Field(default="api.sandbox.webull.com", alias="WEBULL_ENDPOINT")
-    # Accepted from the shared .env; account selection is used by the bullish runner.
-    top_bullish_account_number: str = Field(default="", alias="TOP_BULLISH_ACCOUNT_NUMBER", repr=False)
 
     next_day_exit_enabled: bool = Field(default=False, alias="NEXT_DAY_EXIT_ENABLED")
     next_day_exit_time: str = Field(default="09:35", pattern=r"^(09:(3[0-9]|[45][0-9])|1[0-5]:[0-5][0-9])$", alias="NEXT_DAY_EXIT_TIME")
