@@ -108,6 +108,12 @@ def submit_live_stock(symbol, settings, fingerprint, *, account_resolver,
             'exit_time': getattr(settings, 'next_day_exit_time', '09:35'),
             'due_at': None, 'last_error': None,
         }
+        from app.execution.daily_budget import reserve_daily_budget, DailyBudgetExceeded
+        try:
+            reserve_daily_budget(settings.database_path, 'live_bullish_stocks', order_id,
+                                 amount, getattr(settings, 'live_bullish_daily_limit_usd', 100))
+        except DailyBudgetExceeded as exc:
+            return {'skipped': True, 'reason': str(exc)}
         # Permanent reservation also prevents a replay after a completed exit.
         if not ledger.reserve('live-stock:' + order_id, {'orders': orders}):
             return {'skipped': True, 'reason': 'Live stock attempt already recorded; reconcile before retrying'}

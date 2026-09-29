@@ -1,3 +1,39 @@
+## Live bearish stop-loss toggle (2026-09-28)
+
+WEBULL_LIVE_BEARISH_STOP_LOSS_ENABLED is a validated bool defaulting true; local
+.env is false per user request, .env.example stays true. Shared and alternate
+bearish submission resolve it only in live mode and pass it through the PUT
+executor. PUT builder omits stop construction/price validation when disabled,
+keeping MASTER BUY and STOP_PROFIT SELL legs and their original quantities,
+pricing, time-in-force and daily-budget guard. Paper always enables stops;
+CALL, iron-condor and bullish stock exits are unchanged. Existing broker orders
+are untouched; restart processes to apply. No replacement app-managed PUT stop.
+Validation: 275 tests passed with local dotenv isolated, including actual order
+leg assertions and mode routing. Compilation, focused lint and diff checks pass.
+No broker calls/orders or service restarts were made.
+
+## Daily live entry budgets (2026-09-28)
+
+app/execution/daily_budget.py atomically reserves integer cents under SQLite
+BEGIN IMMEDIATE in daily_entry_budgets. WEBULL_LIVE_BULLISH_DAILY_LIMIT_USD defaults
+100 and caps total requested cash plans across both automated bullish stock paths
+and accounts sharing the database. Stock cap 0 blocks entries. Independent
+WEBULL_LIVE_OPTIONS_DAILY_LIMIT_USD defaults 0 (disabled pending user choice).
+CALL/PUT builders and standalone option buy reserve premium * contracts * 100;
+iron-condor builder reserves maximum defined loss. Option guards read the same
+process environment/database path as broker clients. Stock helper uses settings.
+.env has stock cap 100 and options cap 0; per-stock amount stays 100.
+
+Buckets reset by New York submission date, DST-aware, not by fill date. Reservations
+survive restarts and remain after partial, failed or interrupted submissions;
+no automatic refund/replay. Sales do not consume/replenish budget. Paper, dry-run
+application paths and manual stock tickets are unchanged. Pre-feature trades are
+not backfilled; separate databases have separate budgets. run.md documents these
+limits. Validation: 269 tests pass with local dotenv isolated, including concurrency,
+New York midnight, bucket isolation and option builder cap checks. Compilation,
+focused lint and diff checks pass. No broker calls, runtime database changes or
+service restarts were made.
+
 ## Run configuration guide (2026-09-28)
 
 run.md documents live, sandbox and dry-run configuration combinations, separate

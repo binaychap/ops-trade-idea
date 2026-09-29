@@ -800,3 +800,6 @@ lock. `DRY_RUN=true` previews the cash request without broker calls, reservation
 or live quote/eligibility validation; the exact split is deferred until a fresh
 quote is available. Tests use fake clients; live acceptance and
 broker response fields have not been verified with a real order.
+
+Daily live entry limits are configured separately for bullish stocks and options.
+See [run.md](run.md#daily-live-entry-budgets) for settings and reservation behavior.

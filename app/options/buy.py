@@ -144,6 +144,9 @@ def buy_call_limit(
     print("\nSubmitting Webull option order:")
     print(json.dumps(order, indent=2))
 
+    from decimal import Decimal
+    from app.execution.daily_budget import reserve_live_option_budget
+    reserve_live_option_budget(Decimal(order['limit_price']) * quantity * 100, order['client_order_id'])
     response = trade_client.order_v3.place_order(
         account_id,
         [order]

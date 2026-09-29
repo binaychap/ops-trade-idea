@@ -108,3 +108,49 @@ orders; stopping live monitoring also stops its app-managed exits.
 
 Keep infrastructure-only variables such as `TFE_API_TOKEN` outside the shared
 application `.env`; strict application settings reject unrecognized keys.
+
+## Daily live entry budgets
+
+```ini
+# Requested cash per automated bullish stock purchase
+WEBULL_LIVE_BULLISH_AMOUNT_USD=100
+# Total reserved for automated live bullish stock buys each New York date
+WEBULL_LIVE_BULLISH_DAILY_LIMIT_USD=100
+# Separate options budget; 0 disables the options cap. Set your desired amount.
+WEBULL_LIVE_OPTIONS_DAILY_LIMIT_USD=0
+```
+
+The default stock settings allow one $100 purchase plan per day across both
+bullish entry processes and all stock accounts using the same DATABASE_PATH.
+For several smaller buys, reduce the per-purchase amount while retaining the
+$100 daily cap. A plan that exceeds the remaining budget is skipped, not resized.
+Setting the stock daily cap to 0 blocks new automated live bullish stock buys.
+
+For example, `WEBULL_LIVE_OPTIONS_DAILY_LIMIT_USD=500` enables a separate $500
+options cap. Long CALL/PUT entries reserve limit premium × contracts × 100;
+iron condors reserve their calculated maximum defined loss. This is an entry
+commitment limit, not a realized-loss, cash-debit or fees-inclusive limit.
+
+Reservations are atomic and stored in SQLite's `daily_entry_budgets` table before
+broker submission. They survive restarts and count pending, failed, interrupted
+and partially filled plans conservatively; unused money is not automatically
+refunded. Sells do not consume budget or replenish it. New daily allowance starts
+at midnight America/New_York (including DST), based on submission date rather
+than fill date. Existing trades placed before this feature are not backfilled.
+Paper trading and manual stock tickets are outside these caps. All related
+workers must share one database; separate databases have separate allowances.
+Restart processes after changing limits.
+
+## Live bearish stop-loss toggle
+
+```ini
+WEBULL_LIVE_BEARISH_STOP_LOSS_ENABLED=false
+```
+
+This omits the stop-loss leg from new live bearish PUT entries while retaining
+the configured take-profit LIMIT leg. Paper bearish entries retain both exit
+legs. The code default and `.env.example` use `true`; set `true` to restore stops
+for future live PUT entries. Restart application/runner processes after changing
+this setting. Existing orders are not cancelled or modified, and the profit
+leg's existing time-in-force is unchanged. Bullish and iron-condor exits are
+unaffected. A disabled PUT stop is not replaced by an app-managed stop.

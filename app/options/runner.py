@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.config.strategy import bearish_stop_loss_enabled
+
 import hashlib
 import json
 import logging
@@ -1127,6 +1129,7 @@ def submit_paper_order(
             quantity=quantity,
             profit_percent=profit_percent,
             stop_loss_percent=stop_loss_percent,
+            stop_loss_enabled=bearish_stop_loss_enabled(settings),
         )
 
     logger.info(
