@@ -1,5 +1,5 @@
 from app.common.paths import ENV_FILE
-"""Shared sandbox client, account lookup, and order identifiers."""
+"""Shared paper/live client, account lookup, and order identifiers."""
 
 import os
 import logging
@@ -7,12 +7,13 @@ import uuid
 
 from dotenv import load_dotenv
 import sys
+from app.config.webull import resolve_webull_endpoint
 from webull.core.client import ApiClient
 from webull.trade.trade_client import TradeClient
 
 load_dotenv(ENV_FILE)
 # ============================================================
-# WEBULL SANDBOX
+# WEBULL ENVIRONMENT
 # ============================================================
 
 _trade_client = None
@@ -48,7 +49,7 @@ def get_api_client():
 
     api_client.add_endpoint(
         "us",
-        "api.sandbox.webull.com"
+        resolve_webull_endpoint()
     )
 
     # Prevent the SDK from creating local file logs in the repository root.

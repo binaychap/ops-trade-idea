@@ -53,13 +53,16 @@ class ExitScheduler:
         text = (str(message) + ' ' + str(job.get('entry_submission_error') or '')).lower()
         return 'non_trading_hours' in text or 'non trading hours' in text or 'can_not_trading' in text or 'cannot be placed at this time' in text
 
+    def jobs(self):
+        return [job for job in self.ledger.exit_jobs() if job.get("kind") != "live_cash"]
+
     def run_once(self, now=None):
         now = now or datetime.now(UTC)
         # OS lock is released on process death; avoids expiring-lease double sales.
         with self.ledger.exit_worker_lock() as acquired:
             if not acquired:
                 return
-            for job in self.ledger.exit_jobs():
+            for job in self.jobs():
                 if job.get('next_check_at') and now < datetime.fromisoformat(job['next_check_at']):
                     continue
                 try:

@@ -12,6 +12,7 @@ if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.common.paths import ENV_FILE
+from app.config.webull import resolve_webull_endpoint
 from webull.core.client import ApiClient
 from webull.data.data_client import DataClient
 
@@ -31,10 +32,10 @@ api_client = ApiClient(
     "us"
 )
 
-# IMPORTANT: Paper/Sandbox environment
+# Selected paper/live environment
 api_client.add_endpoint(
     "us",
-    "api.sandbox.webull.com"
+    resolve_webull_endpoint()
 )
 
 # Prevent SDK from creating file log in project root; prefer stream logging.

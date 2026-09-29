@@ -41,6 +41,15 @@ def submit_paper_order(decision: Any, settings: Any, fingerprint: str, payload: 
         if d.get("action") != "buy" or d.get("strategy") != "iron_condor":
             return {"skipped": True, "reason": "Neutral execution requires an iron_condor decision"}
 
+    if (getattr(settings, "webull_trading_mode", "paper") == "live"
+            and d.get("action") == "buy"
+            and payload is not None and getattr(payload, "direction", None) == "bullish"):
+        from app.execution.live_stock import submit_live_stock
+        return submit_live_stock(
+            d["symbol"], settings, fingerprint, budget=d.get("notional_usd"),
+            account_resolver=lambda: bullish_stock_account_id(_load_webull_stock_module(), settings),
+        )
+
     client_order_id = f"om-{fingerprint[:24]}"
     if settings.dry_run:
         return {

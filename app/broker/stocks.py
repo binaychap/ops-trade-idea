@@ -42,6 +42,7 @@ class StockOrder:
     filled: Decimal
     total: Decimal
     filled_at: datetime | None
+    filled_price: Decimal | None = None
 
     @property
     def terminal(self):
@@ -52,7 +53,7 @@ class StockExecution:
     def __init__(self, client):
         self.client = client
 
-    def order(self, account_id, order_id, symbol, side):
+    def order(self, account_id, order_id, symbol, side, *, cash_amount=None):
         try:
             response = self.client.order_v3.get_order_detail(account_id, order_id)
         except Exception as exc:
@@ -76,8 +77,17 @@ class StockExecution:
         if status not in KNOWN_STATUSES:
             raise ValueError(f'Unrecognized broker status: {status}')
         # Never interpret a missing fill count as zero, including cancelled orders.
-        filled, total = quantity(raw['filled_quantity']), quantity(raw['total_quantity'])
-        if total <= 0 or filled > total or (status == 'FILLED' and filled != total):
+        filled = quantity(raw['filled_quantity'])
+        if cash_amount is not None:
+            if raw.get('entrust_type') != 'AMOUNT' or quantity(raw['total_cash_amount']) != Decimal(str(cash_amount)):
+                raise ValueError('Cash order differs from persisted intent')
+            # Cash orders have no fixed requested share count. Reconcile actual fills.
+            total = filled
+            if filled > 1:
+                raise ValueError('Cash entry exceeded one share; manual reconciliation required')
+        else:
+            total = quantity(raw['total_quantity'])
+        if (cash_amount is None and total <= 0) or filled > total or (status == 'FILLED' and (filled != total or filled <= 0)):
             raise ValueError('Inconsistent broker fill quantities')
         filled_at = None
         if filled:
@@ -87,7 +97,12 @@ class StockExecution:
                     raise ValueError('Broker fill timestamp must include timezone')
             elif raw.get('filled_time'):
                 filled_at = datetime.fromtimestamp(int(raw['filled_time']) / 1000, UTC)
-        return StockOrder(order_id, status, filled, total, filled_at)
+        filled_price = None
+        if cash_amount is not None and filled:
+            filled_price = quantity(raw['filled_price'])
+            if filled_price <= 0:
+                raise ValueError('Missing positive cash entry fill price')
+        return StockOrder(order_id, status, filled, total, filled_at, filled_price)
 
     def position(self, account_id, symbol):
         rows = checked_json(self.client.account_v2.get_account_position(account_id))

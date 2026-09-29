@@ -595,3 +595,17 @@ def stop_morning_sell() -> None:
     if stop:
         stop.set()
         app.state.morning_sell_thread.join(timeout=5)
+
+
+@app.on_event("startup")
+def start_live_cash_exits() -> None:
+    from app.exits.live_cash import start_cash_exit_worker
+    app.state.live_cash_worker = start_cash_exit_worker(get_settings())
+
+
+@app.on_event("shutdown")
+def stop_live_cash_exits() -> None:
+    worker = getattr(app.state, "live_cash_worker", None)
+    if worker:
+        worker[0].set()
+        worker[1].join(timeout=5)

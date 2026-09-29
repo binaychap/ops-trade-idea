@@ -120,6 +120,17 @@ class MorningSellScheduler:
                     (row['source'] == 'top_bullish_trades' and self.mark_bullish_rows)
                 )],
             }
+            cash_jobs = [row['job'] for row in holding['sources']
+                         if row.get('job') and row['job'].get('kind') == 'live_cash']
+            if cash_jobs:
+                # The cash worker reconciles prior sales and fills before selling.
+                # Do not mark these jobs complete just because a sale was requested.
+                if not self.dry_run:
+                    for job in cash_jobs:
+                        job['liquidate_requested'] = True
+                        self.ledger.save_exit_job(job)
+                skipped.append({'symbol': symbol, 'reason': 'delegated_to_cash_exit_worker'})
+                continue
             fingerprint = f'morning-sell:{run_date}:{account_id}:{symbol}'
             intent = {
                 'run_date': run_date, 'account_id': account_id, 'symbol': symbol,

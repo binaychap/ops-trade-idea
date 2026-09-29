@@ -175,6 +175,8 @@ def _resolve_account() -> tuple[str, str]:
             raise ValueError("Configured BULLISH_STOCK_ACCOUNT_NUMBER must match exactly one available account")
         account = matches[0]
     else:
+        if getattr(settings, "webull_trading_mode", "paper") == "live":
+            raise ValueError("Set WEBULL_LIVE_BULLISH_STOCK_ACCOUNT_NUMBER for live account access")
         account = accounts[0]
     if not isinstance(account, dict) or not account.get("account_id"):
         raise RuntimeError("No Webull account found")
