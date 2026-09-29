@@ -38,6 +38,7 @@ class BearishPutOptionExecutor:
         profit_percent: float = 20,
         stop_loss_percent: float = 10,
         quote_max_age_seconds: int = 60,
+        stop_loss_enabled: bool = True,
     ) -> dict[str, Any]:
         builder = getattr(self.module, self.order_builder_name())
         return builder(
@@ -50,4 +51,5 @@ class BearishPutOptionExecutor:
             profit_percent=profit_percent,
             stop_loss_percent=stop_loss_percent,
             quote_max_age_seconds=quote_max_age_seconds,
+            **({"stop_loss_enabled": False} if not stop_loss_enabled else {}),
         )

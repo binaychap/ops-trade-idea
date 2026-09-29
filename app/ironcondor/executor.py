@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP
 from typing import Any
+from app.config.strategy import iron_condor_enabled
 
 from app.broker.client import get_data_client, get_trade_client, new_id
 from app.broker.quotes import QuoteError
@@ -147,6 +148,8 @@ class IronCondorOptionExecutor:
                quantity=1, wing_width=None, trade_client=None, profit_percent=10,
                stop_loss_percent=5, exit_time_in_force="GTC", before_submit=None, now=None,
                quote_max_age_seconds=60):
+        if not iron_condor_enabled():
+            raise CondorValidationError("Iron-condor trading is disabled in live mode")
         requested_now = now
         now = now or datetime.now(UTC)
         ref, budget = number(reference_price), number(max_risk_usd)
@@ -206,6 +209,8 @@ class IronCondorOptionExecutor:
                 "entry_credit": float(credit), "profit_debit": float(take_profit),
                 "stop_debit": float(stop), "max_loss_usd": float(max_loss)}
         client = trade_client or (self.module.get_trade_client() if self.module else get_trade_client())
+        from app.execution.daily_budget import reserve_live_option_budget
+        reserve_live_option_budget(max_loss, plan['entry_id'])
         if before_submit:
             before_submit(plan)
         response = client.order_v3.place_order(account_id, orders, client_combo_order_id=plan["combo_id"])

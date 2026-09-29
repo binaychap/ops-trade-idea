@@ -148,7 +148,7 @@ def test_main_routes_only_live_bullish_stocks_to_cash(tmp_path, monkeypatch):
     config = settings(tmp_path)
     config.dry_run = True
     for direction, action in [('bullish', 'buy'), ('bearish', 'sell_short'), ('neutral', 'buy')]:
-        submitter.submit_paper_order(dict(action=action, symbol='AAPL', strategy='iron_condor', notional_usd=250),
+        submitter.submit_paper_order(dict(action=action, symbol='AAPL', strategy='iron_condor' if direction == 'neutral' else 'placeholder', notional_usd=250),
             config, 'test', SimpleNamespace(direction=direction))
     assert helper.call_count == 1
     config.webull_trading_mode = 'paper'

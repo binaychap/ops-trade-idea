@@ -18,8 +18,47 @@ WEBULL_APP_SECRET=your-production-app-secret
 WEBULL_LIVE_BULLISH_STOCK_ACCOUNT_NUMBER=your-live-stock-account-number
 WEBULL_LIVE_TOP_BULLISH_ACCOUNT_NUMBER=your-live-bullish-runner-account-number
 WEBULL_LIVE_OPTIONS_MARGIN_ACCOUNT_NUMBER=your-live-options-account-number
+
+# Live automated bullish stock sizing and daily allowance
 WEBULL_LIVE_BULLISH_AMOUNT_USD=100
+WEBULL_LIVE_BULLISH_DAILY_LIMIT_USD=1000
+
+# Independent options allowance: 0 disables this cap
+WEBULL_LIVE_OPTIONS_DAILY_LIMIT_USD=0
+
+# Live strategy switches
+WEBULL_LIVE_BEARISH_STOP_LOSS_ENABLED=false
+WEBULL_LIVE_IRON_CONDOR_ENABLED=false
 ```
+
+The example above uses your requested $100 per-stock amount and $1,000 daily
+stock cap. These are example configuration values; the code's default stock
+daily cap is $100. Credentials and account numbers are placeholders.
+
+### Live flags and settings reference
+
+| Setting | Meaning | Code default |
+| --- | --- | --- |
+| `WEBULL_TRADING_MODE` | `live` selects production; `paper` selects sandbox. | `paper` |
+| `WEBULL_ENDPOINT` | Must match the mode; blank selects the matching host automatically. | Automatic |
+| `DRY_RUN` | `true` prevents application submissions; `false` permits orders in the selected environment. | `true` |
+| `DATABASE_PATH` | Use a separate live ledger, shared by all live workers that share a daily budget. | `bot.sqlite3` |
+| `WEBULL_APP_KEY` / `WEBULL_APP_SECRET` | Credentials for the selected environment. | Unset |
+| `WEBULL_LIVE_BULLISH_STOCK_ACCOUNT_NUMBER` | Live account for main bullish stock entries, manual stock API and morning sells. | Empty |
+| `WEBULL_LIVE_TOP_BULLISH_ACCOUNT_NUMBER` | Live account for the dedicated bullish runner. | Empty |
+| `WEBULL_LIVE_OPTIONS_MARGIN_ACCOUNT_NUMBER` | Live options account for enabled option strategies. | Empty |
+| `WEBULL_LIVE_BULLISH_AMOUNT_USD` | Requested cash per automated bullish stock purchase plan; minimum $5. | `100` |
+| `WEBULL_LIVE_BULLISH_DAILY_LIMIT_USD` | Daily stock-entry allowance; `0` blocks new automated live bullish stock buys. | `100` |
+| `WEBULL_LIVE_OPTIONS_DAILY_LIMIT_USD` | Independent daily options-entry allowance; `0` disables this cap. | `0` |
+| `WEBULL_LIVE_BEARISH_STOP_LOSS_ENABLED` | `false` omits new live PUT stop-loss legs while keeping profit legs; `true` includes stops. | `true` |
+| `WEBULL_LIVE_IRON_CONDOR_ENABLED` | `false` skips live neutral/IV Crush iron-condor entries; `true` permits the existing profit/stop bracket path. | `false` |
+
+The `WEBULL_LIVE_*` strategy switches and budgets apply only to live trading.
+Sandbox retains its existing entry and bracket behavior. Setting the options
+budget to a positive value does not re-enable iron condors when their switch is
+false. Disabling bearish stops does not disable bearish entries: those remain
+gated separately by `ALLOW_SHORT_SELLING=true`. That existing setting is required
+for bearish PUT entry decisions even though the broker buys a PUT.
 
 This selects production only. Fill in the live account fields used by your
 enabled strategies; live mode never falls back to paper accounts. Automated
@@ -108,3 +147,68 @@ orders; stopping live monitoring also stops its app-managed exits.
 
 Keep infrastructure-only variables such as `TFE_API_TOKEN` outside the shared
 application `.env`; strict application settings reject unrecognized keys.
+
+## Daily live entry budgets
+
+```ini
+# Requested cash per automated bullish stock purchase
+WEBULL_LIVE_BULLISH_AMOUNT_USD=100
+# Total reserved for automated live bullish stock buys each New York date
+WEBULL_LIVE_BULLISH_DAILY_LIMIT_USD=1000
+# Separate options budget; 0 disables the options cap. Set your desired amount.
+WEBULL_LIVE_OPTIONS_DAILY_LIMIT_USD=0
+```
+
+The example allows up to ten $100 purchase plans per day across both bullish
+entry processes and all stock accounts using the same DATABASE_PATH. The code
+default of a $100 daily cap allows one such plan. Reduce the per-purchase amount
+if you want more, smaller purchases within your chosen daily allowance. A plan that exceeds the remaining budget is skipped, not resized.
+Setting the stock daily cap to 0 blocks new automated live bullish stock buys.
+
+For example, `WEBULL_LIVE_OPTIONS_DAILY_LIMIT_USD=500` enables a separate $500
+options cap. Long CALL/PUT entries reserve limit premium × contracts × 100;
+iron condors reserve their calculated maximum defined loss. This is an entry
+commitment limit, not a realized-loss, cash-debit or fees-inclusive limit.
+
+Reservations are atomic and stored in SQLite's `daily_entry_budgets` table before
+broker submission. They survive restarts and count pending, failed, interrupted
+and partially filled plans conservatively; unused money is not automatically
+refunded. Sells do not consume budget or replenish it. New daily allowance starts
+at midnight America/New_York (including DST), based on submission date rather
+than fill date. No reset scheduler deletes or clears records: before each buy,
+the app sums reservations for the current New York date. If the allowance is
+exhausted, new buys skip while the app and exit monitoring keep running.
+Existing trades placed before this feature are not backfilled.
+Paper trading and manual stock tickets are outside these caps. All related
+workers must share one database; separate databases have separate allowances.
+Restart processes after changing limits.
+
+## Live bearish stop-loss toggle
+
+```ini
+WEBULL_LIVE_BEARISH_STOP_LOSS_ENABLED=false
+```
+
+This omits the stop-loss leg from new live bearish PUT entries while retaining
+the configured take-profit LIMIT leg. Paper bearish entries retain both exit
+legs. The code default and `.env.example` use `true`; set `true` to restore stops
+for future live PUT entries. Restart application/runner processes after changing
+this setting. Existing orders are not cancelled or modified, and the profit
+leg's existing time-in-force is unchanged. Bullish and iron-condor exits are
+unaffected. A disabled PUT stop is not replaced by an app-managed stop.
+
+
+## Iron condors
+
+```ini
+WEBULL_LIVE_IRON_CONDOR_ENABLED=false
+```
+
+With this flag false (the default), iron-condor entries are skipped in live
+mode, including neutral ideas and IV Crush ideas labeled `iron_condor`. This happens before broker lookup or budget
+reservation, including live dry runs. Paper/sandbox iron-condor behavior is
+unchanged. Existing broker positions and orders are not closed or cancelled.
+Set the flag to `true` to permit new live iron-condor entries again, with the
+existing profit/stop bracket behavior. Restart workers after changing it.
+The options daily limit still applies to enabled live option entries such as
+CALLs and PUTs, and to iron condors if re-enabled.

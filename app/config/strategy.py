@@ -1,9 +1,15 @@
 """Shared strategy exit percentages; values are percentages, not fractions."""
-from pydantic import Field, model_validator
+import os
+
+from pydantic import Field, TypeAdapter, model_validator
 from app.config.webull import WebullSettings
 
 
 class StrategyExitSettings(WebullSettings):
+    live_iron_condor_enabled: bool = Field(default=False, alias="WEBULL_LIVE_IRON_CONDOR_ENABLED")
+    live_bearish_stop_loss_enabled: bool = Field(default=True, alias="WEBULL_LIVE_BEARISH_STOP_LOSS_ENABLED")
+    live_bullish_daily_limit_usd: float = Field(default=100, ge=0, allow_inf_nan=False, alias="WEBULL_LIVE_BULLISH_DAILY_LIMIT_USD")
+    live_options_daily_limit_usd: float = Field(default=0, ge=0, allow_inf_nan=False, alias="WEBULL_LIVE_OPTIONS_DAILY_LIMIT_USD")
     live_bullish_amount_usd: float = Field(default=100, ge=5, allow_inf_nan=False, alias="WEBULL_LIVE_BULLISH_AMOUNT_USD")
     top_bullish_account_number: str = Field(default="", alias="TOP_BULLISH_ACCOUNT_NUMBER", repr=False)
     paper_bullish_stock_account_number: str = Field(default="", alias="WEBULL_PAPER_BULLISH_STOCK_ACCOUNT_NUMBER", repr=False)
@@ -59,3 +65,17 @@ def bullish_stock_account_id(module, settings):
     if not account_number:
         raise ValueError('Set BULLISH_STOCK_ACCOUNT_NUMBER (WEBULL_LIVE_BULLISH_STOCK_ACCOUNT_NUMBER in live mode) before submitting bullish stock orders')
     return module.get_account_id(account_number=account_number)
+
+
+def bearish_stop_loss_enabled(settings):
+    return (getattr(settings, 'webull_trading_mode', 'paper') != 'live'
+            or getattr(settings, 'live_bearish_stop_loss_enabled', True))
+
+
+def iron_condor_enabled(settings=None):
+    if settings is not None:
+        return (getattr(settings, 'webull_trading_mode', 'paper') != 'live'
+                or getattr(settings, 'live_iron_condor_enabled', False))
+    if os.getenv('WEBULL_TRADING_MODE', 'paper') != 'live':
+        return True
+    return TypeAdapter(bool).validate_python(os.getenv('WEBULL_LIVE_IRON_CONDOR_ENABLED', 'false'))

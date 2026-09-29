@@ -390,6 +390,8 @@ def buy_call_with_bracket(
     # Depending on SDK release, client_combo_order_id may be
     # accepted by the combo-order overload/body.
     # --------------------------------------------------------
+    from app.execution.daily_budget import reserve_live_option_budget
+    reserve_live_option_budget(Decimal(str(entry_limit)) * quantity * 100, master_order['client_order_id'])
     logger = logging.getLogger(__name__)
     logger.info("Submitting option combo for %s %s %s", symbol, strike, expiration)
     logger.debug("Order payload: %s", json.dumps(new_orders))
@@ -424,6 +426,7 @@ def buy_put_with_bracket(
     *,
     exit_time_in_force: str = "DAY",
     quote_max_age_seconds: int = 60,
+    stop_loss_enabled: bool = True,
 ):
     trade_client = trade_client or get_trade_client()
     symbol = symbol.upper()
@@ -438,8 +441,9 @@ def buy_put_with_bracket(
     tick_size = 0.05
     entry_limit = round_to_tick(entry_limit, tick_size)
     take_profit_price = round_to_tick(entry_limit * (1 + profit_percent / 100), tick_size)
-    stop_price = round_to_tick(entry_limit * (1 - stop_loss_percent / 100), tick_size)
-    if not 0 < stop_price < entry_limit < take_profit_price:
+    stop_price = (round_to_tick(entry_limit * (1 - stop_loss_percent / 100), tick_size)
+                  if stop_loss_enabled else None)
+    if not 0 < entry_limit < take_profit_price or (stop_loss_enabled and not 0 < stop_price < entry_limit):
         raise ValueError("PUT bracket prices collapse or are invalid after tick rounding")
     combo_id = new_id()
 
@@ -494,32 +498,36 @@ def buy_put_with_bracket(
         ],
     }
 
-    stop_loss_order = {
-        "client_order_id": new_id(),
-        "combo_type": "STOP_LOSS",
-        "option_strategy": "SINGLE",
-        "instrument_type": "OPTION",
-        "market": "US",
-        "symbol": symbol,
-        "order_type": "STOP_LOSS",
-        "stop_price": f"{stop_price:.2f}",
-        "quantity": str(quantity),
-        "side": "SELL",
-        "time_in_force": exit_time_in_force,
-        "entrust_type": "QTY",
-        "legs": [
-            option_leg(
-                symbol=symbol,
-                strike=strike,
-                expiration=expiration,
-                option_type="PUT",
-                side="SELL",
-                quantity=quantity,
-            )
-        ],
-    }
+    new_orders = [master_order, take_profit_order]
+    if stop_loss_enabled:
+        stop_loss_order = {
+            "client_order_id": new_id(),
+            "combo_type": "STOP_LOSS",
+            "option_strategy": "SINGLE",
+            "instrument_type": "OPTION",
+            "market": "US",
+            "symbol": symbol,
+            "order_type": "STOP_LOSS",
+            "stop_price": f"{stop_price:.2f}",
+            "quantity": str(quantity),
+            "side": "SELL",
+            "time_in_force": exit_time_in_force,
+            "entrust_type": "QTY",
+            "legs": [
+                option_leg(
+                    symbol=symbol,
+                    strike=strike,
+                    expiration=expiration,
+                    option_type="PUT",
+                    side="SELL",
+                    quantity=quantity,
+                )
+            ],
+        }
 
-    new_orders = [master_order, take_profit_order, stop_loss_order]
+        new_orders.append(stop_loss_order)
+    from app.execution.daily_budget import reserve_live_option_budget
+    reserve_live_option_budget(Decimal(str(entry_limit)) * quantity * 100, master_order['client_order_id'])
     logger = logging.getLogger(__name__)
     logger.info("Submitting option combo for %s %s %s", symbol, strike, expiration)
     logger.debug("Order payload: %s", json.dumps(new_orders))

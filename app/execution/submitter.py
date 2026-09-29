@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from app.config.strategy import bearish_stop_loss_enabled, iron_condor_enabled
+
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.config.strategy import exit_percentages, options_margin_account_id, bullish_stock_account_id
+from app.execution.daily_budget import DailyBudgetExceeded
 
 
 def _load_webull_stock_module() -> Any:
@@ -37,6 +40,10 @@ def submit_paper_order(decision: Any, settings: Any, fingerprint: str, payload: 
 
     if d.get("action") == "skip":
         return {"skipped": True, "reason": d.get("rationale", "Decision skipped")}
+    if (not iron_condor_enabled(settings)
+            and (d.get("strategy") == "iron_condor"
+                 or getattr(payload, "direction", None) == "neutral")):
+        return {"skipped": True, "reason": "Iron-condor trading is disabled in live mode"}
     if payload is not None and getattr(payload, "direction", None) == "neutral":
         if d.get("action") != "buy" or d.get("strategy") != "iron_condor":
             return {"skipped": True, "reason": "Neutral execution requires an iron_condor decision"}
@@ -86,7 +93,10 @@ def submit_paper_order(decision: Any, settings: Any, fingerprint: str, payload: 
                 profit_percent=profit_percent,
                 stop_loss_percent=stop_loss_percent,
                 quote_max_age_seconds=getattr(settings, "bearish_quote_max_age_seconds", 60),
+                stop_loss_enabled=bearish_stop_loss_enabled(settings),
             )
+        except DailyBudgetExceeded as exc:
+            return {"skipped": True, "reason": str(exc)}
         except QuoteError as exc:
             import logging
             logging.getLogger(__name__).warning("Skipping bearish PUT for %s: %s", symbol, exc)
@@ -142,6 +152,8 @@ def submit_paper_order(decision: Any, settings: Any, fingerprint: str, payload: 
                 profit_percent=profit_percent, stop_loss_percent=stop_loss_percent,
                 quote_max_age_seconds=getattr(settings, "iron_condor_quote_max_age_seconds", 60),
             )
+        except DailyBudgetExceeded as exc:
+            return {"skipped": True, "reason": str(exc)}
         except AlreadySubmitted:
             return {"skipped": True, "reason": "Iron-condor attempt already recorded; reconcile saved event before retrying"}
         except (CondorValidationError, QuoteError) as exc:
