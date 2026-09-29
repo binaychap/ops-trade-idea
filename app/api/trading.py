@@ -9,8 +9,7 @@ route returns 503.
 - POST /orders/preview  validate a manual stock order; never submits
 - POST /orders          re-validate and submit (confirm=true required)
 
-Manual BUY orders reuse the bot's existing stock bracket submitter
-(entry at market/limit plus the configured stop/target exits). Manual
+Manual BUY orders request $100 at MARKET / DAY without attached exits. Manual
 SELL orders are single-leg NORMAL orders placed through the same
 order_v3.place_order call pattern the scheduled-exit market sells use.
 Stocks only; no option order support.
@@ -33,7 +32,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 
 from app.persistence.ledger import Ledger
-from app.config.strategy import bullish_stock_account_id, exit_percentages
+from app.config.strategy import bullish_stock_account_id
 from app.broker.client import get_trade_client
 from app.broker.quotes import QuoteError, current_stock_quote
 
@@ -354,7 +353,7 @@ class OrderTicket(BaseModel):
     symbol: str
     side: str
     order_type: str
-    quantity: int
+    quantity: float = 1
     limit_price: float | None = None
 
 
@@ -381,12 +380,19 @@ def _preview_ticket(ticket: OrderTicket) -> dict[str, Any]:
         "detail": "symbol looks like a valid ticker" if symbol_ok else f"invalid symbol: {ticket.symbol!r}",
     })
 
-    quantity = ticket.quantity
-    quantity_ok = isinstance(quantity, int) and not isinstance(quantity, bool) and quantity > 0
+    if side == "buy":
+        order_type = "market"
+        warnings.append("Stock buys use $100 MARKET / DAY without attached exits; quantity and limit price are ignored")
+    quantity = ticket.quantity if side == "sell" else 1
+    quantity_ok = math.isfinite(quantity) and quantity > 0
     checks.append({
         "name": "quantity_valid", "passed": quantity_ok,
-        "detail": "quantity is a positive integer" if quantity_ok else f"quantity must be a positive integer, got {quantity!r}",
+        "detail": "quantity is a positive number" if quantity_ok else f"quantity must be a positive number, got {quantity!r}",
     })
+
+    if side == "sell" and quantity_ok and not float(quantity).is_integer() and order_type != "market":
+        checks.append({"name": "price_valid", "passed": False,
+                       "detail": "fractional sells require a market order"})
 
     limit_price = ticket.limit_price
     if isinstance(limit_price, bool):
@@ -417,6 +423,13 @@ def _preview_ticket(ticket: OrderTicket) -> dict[str, Any]:
 
     price_basis = float(limit_price) if (order_type == "limit" and price_ok) else reference_price
     estimated_notional = round(quantity * price_basis, 2) if (quantity_ok and price_basis) else None
+    if side == "buy":
+        estimated_notional = 100.0
+        from app.bullish.stock_bracket import validate_stock_buy
+        try:
+            validate_stock_buy(reference_price or 0, settings.max_notional_usd)
+        except ValueError as exc:
+            checks.append({"name": "price_valid", "passed": False, "detail": str(exc)})
     max_notional = float(settings.max_notional_usd)
     if estimated_notional is None:
         notional_ok = False
@@ -459,7 +472,9 @@ def _preview_ticket(ticket: OrderTicket) -> dict[str, Any]:
         "symbol": symbol,
         "side": side,
         "order_type": order_type,
-        "quantity": quantity if quantity_ok else ticket.quantity,
+        "quantity": None if side == "buy" else quantity,
+        "notional_usd": 100.0 if side == "buy" else None,
+        "time_in_force": "DAY" if order_type == "market" else "GTC",
         "limit_price": round(float(limit_price), 2) if (order_type == "limit" and price_ok) else None,
         "reference_price": reference_price,
         "estimated_notional": estimated_notional,
@@ -484,33 +499,19 @@ def _submit_stock_order(preview: dict[str, Any], client_order_id: str, settings:
     symbol = preview["symbol"]
     side = preview["side"]
     order_type = preview["order_type"]
-    quantity = int(preview["quantity"])
+    quantity = preview["quantity"]
     limit_price = preview["limit_price"]
     trade_client = get_trade_client()
     module = _load_stock_module()
     account_id = bullish_stock_account_id(module, settings)
 
     if side == "buy":
-        # The bot's established stock submitter: bracket entry with
-        # configured stop/target exits around the entry reference price.
-        reference = float(limit_price) if limit_price is not None else preview.get("reference_price")
-        if reference is None:
-            raise RuntimeError("No reference price available for the bracket entry")
-        reference = float(reference)
-        profit_pct, stop_pct = exit_percentages(settings, "bullish")
-        entry = None if order_type == "market" else round(float(limit_price), 2)
-        target = round(reference * (1 + profit_pct / 100), 2)
-        stop = round(reference * (1 - stop_pct / 100), 2)
-        result = module.buy_stock(
-            account_id=account_id,
-            symbol=symbol,
-            quantity=quantity,
-            entry_price=entry,
-            stop_price=stop,
-            target_price=target,
-        )
+        if settings.max_notional_usd < 100:
+            raise ValueError("$100 stock buy exceeds MAX_NOTIONAL_USD")
+        result = module.buy_stock(account_id=account_id, symbol=symbol,
+                                  client_order_id=client_order_id, trade_client=trade_client)
         if not isinstance(result, dict):
-            raise RuntimeError("Unexpected stock bracket response")
+            raise RuntimeError("Unexpected stock order response")
         order_id = str(result.get("order_id") or result.get("entry_id") or "")
         return {
             "order_id": order_id,
@@ -531,7 +532,7 @@ def _submit_stock_order(preview: dict[str, Any], client_order_id: str, settings:
         "side": "SELL",
         "order_type": "MARKET" if order_type == "market" else "LIMIT",
         "quantity": str(quantity),
-        "time_in_force": "DAY",
+        "time_in_force": "DAY" if order_type == "market" else "GTC",
         "support_trading_session": "CORE",
         "entrust_type": "QTY",
     }

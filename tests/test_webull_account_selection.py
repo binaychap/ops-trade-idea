@@ -19,7 +19,7 @@ def test_bullish_passes_selected_account_to_order(tmp_path):
         settings=SimpleNamespace(dry_run=False, database_path=str(tmp_path / 'test.db'),
                                  max_notional_usd=250, account_number='wanted'),
         stock_loader=lambda: stock,
-        quote_provider=lambda symbol: {'price': 100},
+        quote_provider=lambda symbol: {'price': 200},
         market_open=lambda: True,
     )
     assert bot.process({'symbol': 'TEST', 'total_premium': 100, 'trade_count': 1})['status'] == 'submitted'

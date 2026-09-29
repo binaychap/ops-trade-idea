@@ -187,7 +187,7 @@ def buy_call_with_bracket(
     stop_loss_percent: float = 5,
     trade_client=None,
     *,
-    exit_time_in_force: str = "DAY",
+    exit_time_in_force: str = "GTC",
 ):
     trade_client = trade_client or get_trade_client()
     """
@@ -250,7 +250,7 @@ def buy_call_with_bracket(
 
         "side": "BUY",
 
-        "time_in_force": "DAY",
+        "time_in_force": "GTC",
 
         "entrust_type": "QTY",
 
@@ -297,7 +297,7 @@ def buy_call_with_bracket(
 
         "side": "SELL",
 
-        # Webull option sell orders require DAY
+        # Options support DAY and GTC; new orders default to GTC.
         "time_in_force": exit_time_in_force,
 
         "entrust_type": "QTY",
@@ -421,7 +421,7 @@ def buy_put_with_bracket(
     stop_loss_percent: float = 10,
     trade_client=None,
     *,
-    exit_time_in_force: str = "DAY",
+    exit_time_in_force: str = "GTC",
     quote_max_age_seconds: int = 60,
 ):
     trade_client = trade_client or get_trade_client()
@@ -453,7 +453,7 @@ def buy_put_with_bracket(
         "limit_price": f"{entry_limit:.2f}",
         "quantity": str(quantity),
         "side": "BUY",
-        "time_in_force": "DAY",
+        "time_in_force": "GTC",
         "entrust_type": "QTY",
         "position_intent": "BUY_TO_OPEN",
         "legs": [

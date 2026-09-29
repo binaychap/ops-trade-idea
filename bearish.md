@@ -100,11 +100,11 @@ an `ordered` row; it is not a permanent symbol-only exclusion.
 | Entry premium | Selected PUT contract snapshot ask, rounded to a 0.05 tick; no estimated-premium fallback |
 | Contract selection | Paginated PUT chain; earliest eligible listed expiration and closest available strike |
 | Quantity | One contract |
-| Entry | PUT `BUY`, `BUY_TO_OPEN`, LIMIT, DAY |
+| Entry | PUT `BUY`, `BUY_TO_OPEN`, LIMIT, GTC |
 | Take profit | PUT SELL LIMIT at entry premium plus 20% |
 | Stop loss | PUT SELL STOP_LOSS at entry premium minus 10% |
 | Price rounding | Entry and exit premiums rounded to a 0.05 tick |
-| Exit duration | DAY by default |
+| Exit duration | GTC by default |
 
 The feed target and stop validate the underlying bearish setup. The submitted
 exit prices are calculated separately from the option entry premium. Contract

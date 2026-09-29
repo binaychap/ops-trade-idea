@@ -40,7 +40,7 @@ class StockOrder:
     client_order_id: str
     status: str
     filled: Decimal
-    total: Decimal
+    total: Decimal | None
     filled_at: datetime | None
 
     @property
@@ -76,8 +76,10 @@ class StockExecution:
         if status not in KNOWN_STATUSES:
             raise ValueError(f'Unrecognized broker status: {status}')
         # Never interpret a missing fill count as zero, including cancelled orders.
-        filled, total = quantity(raw['filled_quantity']), quantity(raw['total_quantity'])
-        if total <= 0 or filled > total or (status == 'FILLED' and filled != total):
+        filled = quantity(raw['filled_quantity'])
+        amount_order = raw.get('entrust_type') == 'AMOUNT' and side == 'BUY'
+        total = None if amount_order else quantity(raw['total_quantity'])
+        if total is not None and (total <= 0 or filled > total or (status == 'FILLED' and filled != total)):
             raise ValueError('Inconsistent broker fill quantities')
         filled_at = None
         if filled:

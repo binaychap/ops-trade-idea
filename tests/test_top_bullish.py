@@ -92,8 +92,8 @@ def test_dry_run_persists_and_skips_symbol(tmp_path):
     bot = runner(tmp_path)
     result = bot.run()[0]
     assert result['status'] == 'dry_run'
-    assert result['order']['stop_price'] == 190
-    assert result['order']['target_price'] == 220
+    assert result['order']['notional_usd'] == 100
+    assert result['order']['order_type'] == 'MARKET'
     assert bot.run()[0]['status'] == 'skipped'
     bot.stock_loader.assert_not_called()
     bot.quote_provider.assert_called_once_with('AAPL')
@@ -106,8 +106,8 @@ def test_submission_tracking_saved_before_broker_and_duplicate_id(tmp_path):
             row = conn.execute('SELECT status, tracking_json FROM top_bullish_trades').fetchone()
         assert row[0] == 'submitting'
         assert 'fake-entry' in row[1]
-        assert kwargs['quantity'] == 1
-        assert kwargs['entry_price'] == 200
+        assert 'quantity' not in kwargs
+        assert 'entry_price' not in kwargs
         return {'entry_id': 'fake-entry'}
     bot = runner(tmp_path, dry_run=False, buy=buy_stock, items=[{**ITEM, 'id': 'same'}])
     assert bot.run()[0]['status'] == 'submitted'
@@ -130,8 +130,8 @@ def test_quote_failure_and_budget_do_not_submit(tmp_path):
     bot.quote_provider.side_effect = ValueError('stale')
     assert bot.run()[0]['status'] == 'skipped'
     bot.quote_provider.side_effect = None
-    bot.quote_provider.return_value = {'price': 300}
-    assert bot.run()[0]['reason'] == 'One share exceeds MAX_NOTIONAL_USD'
+    bot.quote_provider.return_value = {'price': 100}
+    assert 'share price above $100' in bot.run()[0]['reason']
     bot.stock_loader.assert_not_called()
 
 

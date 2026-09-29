@@ -116,7 +116,7 @@ The executor skips an over-budget selection rather than searching narrower wings
 
 | Order       | Overall side       | Type      | Price               | Duration |
 | ----------- | ------------------ | --------- | ------------------- | -------- |
-| MASTER      | SELL, SELL_TO_OPEN | LIMIT     | Net entry credit    | DAY      |
+| MASTER      | SELL, SELL_TO_OPEN | LIMIT     | Net entry credit    | GTC      |
 | STOP_PROFIT | BUY                | LIMIT     | Entry credit × 0.90 | GTC      |
 | STOP_LOSS   | BUY                | STOP_LOSS | Entry credit × 1.05 | GTC      |
 

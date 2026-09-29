@@ -66,7 +66,7 @@ def test_credit_bracket_reverses_all_four_legs_and_prices_from_premium():
     assert stop['stop_price'] == '3.15'
     assert profit['side'] == stop['side'] == 'BUY'
     assert profit['time_in_force'] == stop['time_in_force'] == 'GTC'
-    assert entry['time_in_force'] == 'DAY'
+    assert entry['time_in_force'] == 'GTC'
     for closing in (profit, stop):
         assert 'position_intent' not in closing
         assert len(closing['legs']) == 4
@@ -191,7 +191,7 @@ def test_dry_run_never_loads_broker_or_reserves(monkeypatch, tmp_path):
     from app.execution import submitter as webull_submitter
     monkeypatch.setattr(webull_submitter, '_load_webull_option_module', lambda: pytest.fail('broker loaded'))
     settings = SimpleNamespace(dry_run=True, database_path=str(tmp_path / 'unused.sqlite3'))
-    result = webull_submitter.submit_paper_order(dict(action='buy', strategy='iron_condor'), settings, 'fp')
+    result = webull_submitter.submit_paper_order(dict(action='buy', strategy='iron_condor'), settings, 'fp', SimpleNamespace(direction='neutral'))
     assert result['dry_run']
     assert not (tmp_path / 'unused.sqlite3').exists()
 

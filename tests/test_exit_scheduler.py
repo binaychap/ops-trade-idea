@@ -304,16 +304,19 @@ def test_market_order_is_normal_sell_without_limit():
                       'support_trading_session': 'CORE', 'entrust_type': 'QTY'}]
 
 
-def test_tracking_persisted_before_bracket_submission_with_gtc_exits():
+def test_tracking_persisted_before_fractional_submission(monkeypatch):
     spec = importlib.util.spec_from_file_location('stock_test', Path(__file__).parents[1] / 'app/bullish/stock_bracket.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    monkeypatch.setattr(module, 'current_stock_quote', lambda symbol: {'price': 200})
     tracked = {}
     def place(account, orders, **kwargs):
         assert tracked['entry_id'] == orders[0]['client_order_id']
-        assert tracked['profit_id'] == orders[1]['client_order_id']
-        assert tracked['stop_id'] == orders[2]['client_order_id']
-        assert [o['time_in_force'] for o in orders] == ['DAY', 'GTC', 'GTC']
+        assert len(orders) == 1
+        assert tracked['profit_id'] is None
+        assert orders[0]['total_cash_amount'] == '100.00'
+        assert orders[0]['time_in_force'] == 'DAY'
+        assert 'quantity' not in orders[0]
         return response({})
     result = module.buy_stock('test', 'AAPL', 1, 100, 95, 110,
                               trade_client=SimpleNamespace(order_v3=SimpleNamespace(place_order=place)),
@@ -367,6 +370,7 @@ def test_scheduled_submission_persists_intent_even_if_broker_times_out(monkeypat
     spec = importlib.util.spec_from_file_location('scheduled_stock', Path(__file__).parents[1] / 'app/bullish/stock_bracket.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    monkeypatch.setattr(module, 'current_stock_quote', lambda symbol: {'price': 200})
     database = str(tmp_path / 'scheduled.sqlite3')
     calls = []
     def place(account, orders, **kwargs):
@@ -458,3 +462,20 @@ def test_sdk_error_logs_do_not_emit_signed_request():
     assert SafeSdkLogFilter().filter(record)
     assert 'x-app-key' not in record.getMessage()
     assert 'x-signature' not in record.getMessage()
+
+
+def test_amount_entry_exit_uses_actual_fractional_fills(setup):
+    ledger, broker, worker = setup
+    job = ledger.exit_jobs()[0]
+    job.update(entry_kind='amount', quantity=None, profit_id=None, stop_id=None)
+    ledger.save_exit_job(job)
+    broker.orders = {'entry': StockOrder('entry', 'FILLED', Decimal('0.4321'), None, FILL)}
+    broker.held = Decimal('0.4321')
+    worker.run_once(DUE)
+    assert broker.sells[0][1] == Decimal('0.4321')
+    assert broker.cancels == []
+    order_id = broker.sells[0][0]
+    broker.orders[order_id] = replace(broker.orders[order_id], status='FILLED', filled=Decimal('0.4321'))
+    worker.run_once(DUE)
+    assert ledger.exit_jobs(include_complete=True)[0]['status'] == 'complete'
+    assert len(broker.sells) == 1

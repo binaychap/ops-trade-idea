@@ -191,7 +191,7 @@ class IronCondorOptionExecutor:
                   "symbol": symbol, "quantity": str(quantity), "entrust_type": "QTY"}
         orders = [
             {**common, "client_order_id": new_id(), "combo_type": "MASTER", "order_type": "LIMIT",
-             "side": "SELL", "position_intent": "SELL_TO_OPEN", "time_in_force": "DAY",
+             "side": "SELL", "position_intent": "SELL_TO_OPEN", "time_in_force": "GTC",
              "limit_price": f"{credit:.2f}", "legs": entry_legs},
             {**common, "client_order_id": new_id(), "combo_type": "STOP_PROFIT", "order_type": "LIMIT",
              "side": "BUY", "time_in_force": exit_time_in_force,

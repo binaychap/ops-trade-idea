@@ -115,7 +115,7 @@ def buy_call_limit(
         # Number of option contracts
         "quantity": str(quantity),
 
-        "time_in_force": "DAY",
+        "time_in_force": "GTC",
         "entrust_type": "QTY",
 
         # Option contract details

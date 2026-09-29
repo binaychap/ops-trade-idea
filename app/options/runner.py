@@ -442,7 +442,7 @@ def build_option_trade_request(
         notional=requested_notional,
         side=OrderSide.BUY if decision.action == "buy" else OrderSide.SELL,
         type=OrderType.MARKET,
-        time_in_force=TimeInForce.DAY,
+        time_in_force=TimeInForce.GTC,
         client_order_id=client_order_id or f"option-{decision.symbol.lower()}-{int(time.time())}",
         order_class=OrderClass.SIMPLE,
     )

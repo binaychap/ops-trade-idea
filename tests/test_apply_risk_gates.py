@@ -448,9 +448,9 @@ def test_submit_paper_order_calculates_stop_and_target_from_entry(monkeypatch):
 
     submit_paper_order(decision, settings, "fingerprint-1234567890abcd", payload)
 
-    assert captured["entry_price"] == 100.0
-    assert captured["stop_price"] == 95.0
-    assert captured["target_price"] == 110.0
+    assert captured["symbol"] == "AAPL"
+    assert "quantity" not in captured
+    assert "stop_price" not in captured
 
 
 def test_submit_paper_order_routes_bearish_decisions_to_put_executor(monkeypatch):
@@ -506,7 +506,7 @@ def test_submit_paper_order_routes_bearish_decisions_to_put_executor(monkeypatch
     assert captured["submit_kwargs"]["stop_loss_percent"] == 10
 
 
-def test_buy_stock_submits_combo_bracket_order(monkeypatch):
+def test_buy_stock_submits_fixed_amount_order(monkeypatch):
     import importlib.util
     from pathlib import Path
 
@@ -516,6 +516,7 @@ def test_buy_stock_submits_combo_bracket_order(monkeypatch):
     assert spec and spec.loader
     spec.loader.exec_module(module)
 
+    monkeypatch.setattr(module, 'current_stock_quote', lambda symbol: {'price': 200})
     calls = []
 
     class FakeTradeClient:
@@ -542,14 +543,13 @@ def test_buy_stock_submits_combo_bracket_order(monkeypatch):
     )
 
     assert len(calls) == 1
-    assert len(calls[0]["orders"]) == 3
-    assert calls[0]["kwargs"]["client_combo_order_id"]
-    assert {order["combo_type"] for order in calls[0]["orders"]} == {"MASTER", "STOP_PROFIT", "STOP_LOSS"}
+    assert len(calls[0]["orders"]) == 1
+    assert calls[0]["kwargs"] == {}
+    assert calls[0]["orders"][0]["total_cash_amount"] == "100.00"
+    assert calls[0]["orders"][0]["combo_type"] == "NORMAL"
     assert all(order["instrument_type"] == "EQUITY" for order in calls[0]["orders"])
     assert all(order["support_trading_session"] == "CORE" for order in calls[0]["orders"])
     assert calls[0]["orders"][0]["side"] == "BUY"
-    assert calls[0]["orders"][1]["side"] == "SELL"
-    assert calls[0]["orders"][2]["side"] == "SELL"
 
 
 def test_submit_paper_order_fails_immediately_on_webull_429(monkeypatch):

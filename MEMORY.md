@@ -1,5 +1,34 @@
 # Ops Trade Idea — project memory
 
+## Fixed-dollar stock entries and duration policy (2026-09-28)
+
+All stock buy paths now use the legacy-named `app/bullish/stock_bracket.py`
+helper to submit one NORMAL MARKET / DAY / CORE order with AMOUNT and
+`total_cash_amount=100.00`, without a quantity or attached exits. Legacy helper
+quantity/price arguments cannot increase the dollar request. Main feed and
+bullish runner enforce MAX_NOTIONAL_USD >= 100; the shared cap/default and option
+budgets are unchanged. Manual API previews normalize buys to $100, expose the
+DAY/market behavior and absent exits, and accept fractional market sell quantities.
+Whole-share manual limit sells and option entry/exit defaults now use GTC;
+market stock sells remain DAY. No live orders or environment edits made.
+
+Webull's stock API docs restrict AMOUNT to less than one share's price and
+fractional orders to MARKET. Helper rechecks a fresh stock quote; prices <= $100
+are rejected, not converted to whole-share buys. Symbol/account fractional
+eligibility, DAY amount acceptance and response schema remain unverified live.
+Main dry runs remain broker-free and cannot establish quote/eligibility validity.
+
+New scheduled stock jobs store entry_kind=amount, quantity=null and no exit IDs;
+next-day reconciliation uses actual fractional fills. Amount BUY order details
+need no requested total_quantity; missing fill counts remain errors. Existing
+bracket jobs retain reconciliation/cancellation behavior and unknown submissions
+are never blindly replayed. Standalone/manual entries still do not register
+next-day jobs; account-wide morning sells remain separately configured.
+Validation: 219 mocked tests pass; compilation and focused Ruff F821/F401
+checks pass. Historical one-share/bracket descriptions below are superseded
+by this section.
+
+
 ## GCP free-tier Terraform deployment (2026-09-26)
 
 Terraform code lives in the separate repo `binaychap/ops-trade-idea-gcp`

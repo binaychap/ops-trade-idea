@@ -41,6 +41,12 @@ def submit_paper_order(decision: Any, settings: Any, fingerprint: str, payload: 
         if d.get("action") != "buy" or d.get("strategy") != "iron_condor":
             return {"skipped": True, "reason": "Neutral execution requires an iron_condor decision"}
 
+    is_stock = d.get("action") == "buy" and not (payload is not None and getattr(payload, "direction", None) == "neutral")
+    if is_stock:
+        if settings.max_notional_usd < 100:
+            return {"skipped": True, "reason": "$100 stock buy exceeds MAX_NOTIONAL_USD"}
+        d = {**d, "notional_usd": 100.0}
+
     client_order_id = f"om-{fingerprint[:24]}"
     if settings.dry_run:
         return {
@@ -49,6 +55,7 @@ def submit_paper_order(decision: Any, settings: Any, fingerprint: str, payload: 
             "symbol": d.get("symbol"),
             "action": d.get("action"),
             "notional_usd": d.get("notional_usd"),
+            **({"order_type": "MARKET", "time_in_force": "DAY", "quantity": None} if is_stock else {}),
         }
 
     action = d.get("action")
@@ -158,27 +165,7 @@ def submit_paper_order(decision: Any, settings: Any, fingerprint: str, payload: 
     webull_module = _load_webull_stock_module()
     account_id = bullish_stock_account_id(webull_module, settings)
 
-    quantity = 1
-    execute_at_market = bool(d.get("execute_at_market", False))
-    # Determine a stable reference price for stop/target even when entry is a market order.
-    reference = (
-        float(payload.entry_price)
-        if payload is not None and getattr(payload, "entry_price", None) is not None
-        else max(float(d.get("notional_usd") or 0.0) / 100.0, 0.01)
-    )
-    entry_price = None if execute_at_market else reference
-    profit_percent, stop_loss_percent = exit_percentages(settings, "bullish")
-    stop_price = round(reference * (1 - stop_loss_percent / 100), 2)
-    target_price = round(reference * (1 + profit_percent / 100), 2)
-
-    order_kwargs = dict(
-        account_id=account_id,
-        symbol=symbol,
-        quantity=quantity,
-        entry_price=entry_price,
-        stop_price=stop_price,
-        target_price=target_price,
-    )
+    order_kwargs = dict(account_id=account_id, symbol=symbol)
 
     if getattr(settings, "next_day_exit_enabled", False):
         if action != "buy":
@@ -203,7 +190,7 @@ def submit_paper_order(decision: Any, settings: Any, fingerprint: str, payload: 
                 nonlocal tracked_job
                 job = {
                     "id": client_order_id, "account_id": account_id,
-                    "symbol": symbol, "quantity": str(quantity),
+                    "symbol": symbol, "quantity": None, "entry_kind": "amount",
                     **tracking, "status": "waiting_entry", "market_orders": [],
                     "due_at": None, "last_error": None,
                 }
@@ -225,7 +212,7 @@ def submit_paper_order(decision: Any, settings: Any, fingerprint: str, payload: 
 
     return {
         "dry_run": False,
-        "id": str(order_result.get("order_id") or order_result.get("client_order_id") or ""),
+        "id": str(order_result.get("entry_id") or order_result.get("order_id") or order_result.get("client_order_id") or ""),
         "client_order_id": client_order_id,
         "symbol": symbol,
         "status": "submitted",

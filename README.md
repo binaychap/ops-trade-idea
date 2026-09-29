@@ -143,11 +143,11 @@ and an empty key disables all four routes with 503.
   in the ledger `events` table with source `manual` under fingerprint
   `manual:<client_order_id>`.
 
-Manual **buy** orders reuse the bot's existing stock bracket submitter
-(`webull-buy-combo-stock.py`): entry at market or limit plus the configured
-bullish stop/target exits. Manual **sell** orders are single-leg NORMAL
-orders placed through `order_v3.place_order`, the same leg shape the
-scheduled-exit market sells use. Stocks only; no option orders.
+Manual **buy** orders always request $100 using `NORMAL / MARKET / DAY / AMOUNT`
+through `app/bullish/stock_bracket.py`, without attached stop/target exits.
+The preview explicitly overrides the ticket's quantity and limit price.
+Manual **sell** orders accept fractional quantities; market sells use DAY and
+whole-share limit sells use GTC. Stocks only; no option orders.
 
 The iPhone cannot reach `127.0.0.1`; bind the server to the Mac's LAN
 address so the app can connect:
@@ -178,12 +178,11 @@ startup and broker submissions. After sandbox validation, set
 The worker runs independently of Optionomics feed polling. No `.env` values
 were changed when this feature was added.
 
-When enabled, new stock brackets retain `DAY` for the entry and use `GTC` for
-both exit legs. The stop remains 5% below entry and the target 10% above entry.
-Bracket IDs are stored **before** submission in `scheduled_stock_exits`; the
-actual broker fill timestamp determines the scheduled date. Unfilled entries
-have no exit deadline. Only newly tracked orders are managed; existing ledger
-rows and positions are not automatically adopted.
+When enabled, new $100 market entries persist their entry ID **before** submission
+in `scheduled_stock_exits`. They have no attached exit legs. Actual broker fill
+quantity and timestamp determine the shares to sell and scheduled date. Unfilled
+entries have no exit deadline. Existing bracket jobs remain supported; unrelated
+positions and ledger rows are not automatically adopted.
 
 Before the scheduled market sale, the worker cancels any entry remainder and
 outstanding bracket exits, queries their final statuses, and subtracts all
@@ -548,10 +547,10 @@ Date inputs use your browser timezone; From is inclusive and Until is exclusive.
 Today selects the current local day. Results are paginated in groups of 50.
 The page is read-only and includes raw stored payloads; use it on localhost.
 
-### Top bullish flow stock brackets
+### Top bullish flow stock buys
 
 Run the standalone `MainTopBullish` runner to fetch up to 10 bullish-flow symbols,
-request current Webull stock snapshots, and prepare one-share limit brackets:
+request current Webull stock snapshots, and prepare $100 fractional market buys:
 
 ```bash
 DRY_RUN=true DATABASE_PATH=/tmp/bullish-preview.sqlite3 uv run python app/main-top-bullish.py --limit 10
@@ -560,15 +559,16 @@ DRY_RUN=true DATABASE_PATH=/tmp/bullish-preview.sqlite3 uv run python app/main-t
 Requires `OPTIONOMICS_EMAIL`, `OPTIONOMICS_API_KEY`, `WEBULL_APP_KEY`, and
 `WEBULL_APP_SECRET` in the environment or `.env`, plus access to Webull snapshot
 data. Quotes older than five minutes are skipped, including old quotes outside
-market hours. Entry is the quoted stock price, stop is 5% below entry, and target
-is 10% above entry. One share must fit `MAX_NOTIONAL_USD` (default $250).
+market hours. Each buy is exactly $100 of requested notional, subject to broker
+execution. The cap `MAX_NOTIONAL_USD` must be at least $100. Quotes at or below
+$100 are skipped because Webull documents AMOUNT orders only below one share.
 
 To enable sandbox orders, use `DRY_RUN=false` with your intended `DATABASE_PATH`.
 Set `TOP_BULLISH_ACCOUNT_NUMBER` to the desired sandbox account number in `.env`.
 The runner requires an exact unique account match before claiming or submitting
 a trade. Existing symbol deduplication still applies when changing accounts.
-The runner calls `webull-buy-combo-stock.py`; exits use DAY time in force and the
-runner does not start the next-day exit scheduler. It scans immediately and
+The runner calls `app/bullish/stock_bracket.py` for MARKET / DAY entries without
+attached exits. It does not start the next-day exit scheduler. It scans immediately and
 then every five minutes while the process stays running. Stop with Ctrl+C;
 add `--once` to run one scan and exit. Scans never overlap, missed intervals
 are skipped, and a failed scan is retried at the next scheduled interval.

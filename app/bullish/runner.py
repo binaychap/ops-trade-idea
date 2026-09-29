@@ -1,4 +1,4 @@
-"""Bullish-flow stock bracket runner polling every five minutes; DRY_RUN=true by default."""
+"""Bullish-flow fixed-dollar stock runner polling every five minutes; DRY_RUN=true by default."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from app.common.paths import ENV_FILE
 
 from pydantic import Field
 from pydantic_settings import SettingsConfigDict
-from app.config.strategy import StrategyExitSettings, exit_percentages
+from app.config.strategy import StrategyExitSettings
 
 from app.bullish.ledger import BullishLedger
 from app.exits.next_day import ExitCalendar
@@ -135,16 +135,12 @@ class MainTopBullish:
             detail = describe_webull_error(exc)
             logger.error('Webull quote for %s failed: %s', symbol, detail)
             return {'symbol': symbol, 'status': 'skipped', 'reason': f'Quote unavailable: {detail}'}
-        entry = round(float(quote['price']), 2)
-        profit_percent, stop_loss_percent = exit_percentages(self.settings, "bullish")
-        stop = round(entry * (1 - stop_loss_percent / 100), 2)
-        target = round(entry * (1 + profit_percent / 100), 2)
-        if not math.isfinite(entry) or not 0 < stop < entry < target:
-            raise ValueError(f'{symbol}: invalid bracket prices')
-        if entry > self.settings.max_notional_usd:
-            return {'symbol': symbol, 'status': 'skipped', 'reason': 'One share exceeds MAX_NOTIONAL_USD'}
-        order_request = dict(symbol=symbol, quantity=1, entry_price=entry,
-                             stop_price=stop, target_price=target)
+        from app.bullish.stock_bracket import validate_stock_buy
+        try:
+            validate_stock_buy(float(quote['price']), self.settings.max_notional_usd)
+        except ValueError as exc:
+            return {'symbol': symbol, 'status': 'skipped', 'reason': str(exc)}
+        order_request = dict(symbol=symbol)
         normalized = {**item, 'symbol': symbol, 'total_premium': premium, 'trade_count': count, 'entry_quote': quote}
         if not self.market_open():
             return {'symbol': symbol, 'status': 'skipped', 'reason': 'outside_market_hours'}
@@ -153,11 +149,11 @@ class MainTopBullish:
                 raise ValueError('Set TOP_BULLISH_ACCOUNT_NUMBER before submitting orders')
             stock = self.stock_loader()
             account_id = stock.get_account_id(account_number=self.settings.account_number.strip())
-        if not self.ledger.claim(trade_id, normalized, order_request):
+        if not self.ledger.claim(trade_id, normalized, {**order_request, 'notional_usd': 100.0, 'order_type': 'MARKET', 'time_in_force': 'DAY'}):
             return {'symbol': symbol, 'status': 'skipped', 'reason': 'Trade or symbol already present'}
         if self.settings.dry_run:
             self.ledger.update(trade_id, 'dry_run')
-            return {'symbol': symbol, 'status': 'dry_run', 'order': order_request}
+            return {'symbol': symbol, 'status': 'dry_run', 'order': {**order_request, 'notional_usd': 100.0, 'order_type': 'MARKET', 'time_in_force': 'DAY'}}
         attempted = False
 
         def before_submit(tracking):

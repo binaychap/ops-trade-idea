@@ -113,12 +113,14 @@ class ExitScheduler:
         return order
 
     def _bracket(self, job):
-        return [self._order(job, job['entry_id'], 'BUY'),
-                self._order(job, job['profit_id']), self._order(job, job['stop_id'])]
+        entry = self._order(job, job['entry_id'], 'BUY')
+        if job.get('entry_kind') == 'amount':
+            return [entry]
+        return [entry, self._order(job, job['profit_id']), self._order(job, job['stop_id'])]
 
     def reconcile(self, job, now):
         entry = self._order(job, job['entry_id'], 'BUY')
-        if entry.filled > Decimal(job['quantity']):
+        if job.get('entry_kind') != 'amount' and entry.filled > Decimal(job['quantity']):
             raise ValueError('Entry fills exceed tracked quantity')
         if entry.filled and not job.get('due_at'):
             if entry.filled_at is None:
@@ -133,7 +135,7 @@ class ExitScheduler:
 
         bracket = self._bracket(job)
         entry = bracket[0]
-        closed_by_bracket = bracket[1].filled + bracket[2].filled
+        closed_by_bracket = sum((order.filled for order in bracket[1:]), Decimal(0))
         due = job.get('due_at') and now >= datetime.fromisoformat(job['due_at'])
         already_closed = entry.terminal and closed_by_bracket == entry.filled
         if not already_closed and (not due or not self.calendar.is_open(now)):
@@ -149,9 +151,9 @@ class ExitScheduler:
         if not all(order.terminal for order in bracket):
             return
         entry = bracket[0]
-        remaining = entry.filled - bracket[1].filled - bracket[2].filled
+        remaining = entry.filled - sum((order.filled for order in bracket[1:]), Decimal(0))
         job['entry_filled_quantity'] = str(entry.filled)
-        job['bracket_filled_quantity'] = str(bracket[1].filled + bracket[2].filled)
+        job['bracket_filled_quantity'] = str(sum((order.filled for order in bracket[1:]), Decimal(0)))
 
         # Persisted attempts include submissions whose HTTP response was lost.
         # Missing/unknown broker results raise: never blindly replay a market sell.
