@@ -79,7 +79,11 @@ class StockExecution:
         # Never interpret a missing fill count as zero, including cancelled orders.
         filled = quantity(raw['filled_quantity'])
         if cash_amount is not None:
-            if raw.get('entrust_type') != 'AMOUNT' or quantity(raw['total_cash_amount']) != Decimal(str(cash_amount)):
+            # total_cash_amount is a place-order request field only; Webull's
+            # order detail never echoes it back. Identity is already established
+            # by the client_order_id match plus the symbol/side/instrument_type
+            # checks above, so there is nothing to compare here.
+            if raw.get('entrust_type') != 'AMOUNT':
                 raise ValueError('Cash order differs from persisted intent')
             # Cash orders have no fixed requested share count. Reconcile actual fills.
             total = filled
@@ -99,6 +103,8 @@ class StockExecution:
                 filled_at = datetime.fromtimestamp(int(raw['filled_time']) / 1000, UTC)
         filled_price = None
         if cash_amount is not None and filled:
+            if raw.get('filled_price') is None:
+                raise ValueError('Cash entry fill price missing; reconciliation deferred')
             filled_price = quantity(raw['filled_price'])
             if filled_price <= 0:
                 raise ValueError('Missing positive cash entry fill price')
