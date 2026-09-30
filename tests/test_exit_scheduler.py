@@ -428,6 +428,32 @@ def test_missing_entry_waits_and_backs_off_across_restart(setup):
     assert ledger.exit_jobs()[0]['next_check_at'] is None
 
 
+def test_generic_reconcile_failure_backs_off_and_resets(setup):
+    from datetime import timedelta
+    ledger, broker, worker = setup
+    original_order = broker.order
+    calls = []
+    def boom(*args, **kwargs):
+        calls.append(args)
+        raise RuntimeError('broker exploded')
+    broker.order = boom
+    worker.run_once(DUE)
+    job = ledger.exit_jobs()[0]
+    assert 'broker exploded' in job['last_error']
+    assert dt(job['next_check_at']) == DUE + timedelta(seconds=60)
+    worker.run_once(DUE + timedelta(seconds=30))
+    assert len(calls) == 1
+    worker.run_once(DUE + timedelta(seconds=61))
+    assert len(calls) == 2
+    assert dt(ledger.exit_jobs()[0]['next_check_at']) == DUE + timedelta(seconds=181)
+    broker.order = original_order
+    worker.run_once(DUE + timedelta(seconds=181))
+    assert len(broker.sells) == 1
+    job = ledger.exit_jobs()[0]
+    assert job['next_check_at'] is None
+    assert job['reconcile_failures'] == 0
+
+
 @pytest.mark.parametrize('raised', [True, False])
 def test_webull_missing_order_response_is_recognized(raised):
     from app.broker.stocks import OrderNotFound

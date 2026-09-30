@@ -69,6 +69,7 @@ class ExitScheduler:
                     self.reconcile(job, now)
                     job['last_error'] = None
                     job['missing_order_checks'] = 0
+                    job['reconcile_failures'] = 0
                     job['next_check_at'] = None
                 except OrderNotFound as exc:
                     if self._is_non_trading_hours_rejection(job, exc):
@@ -89,8 +90,17 @@ class ExitScheduler:
                         delay,
                     )
                 except Exception as exc:
-                    job['last_error'] = str(exc)[:500]
-                    logger.warning('Scheduled stock exit %s deferred: %s', job['id'], exc)
+                    # Any other failure (broker schema drift, quote errors, ...)
+                    # backs off exponentially instead of retrying every worker tick.
+                    checks = min(int(job.get('reconcile_failures', 0)) + 1, 5)
+                    delay = min(60 * 2 ** (checks - 1), 900)
+                    job['reconcile_failures'] = checks
+                    job['next_check_at'] = (now + timedelta(seconds=delay)).isoformat()
+                    job['last_error'] = (str(exc) or repr(exc))[:500]
+                    logger.warning(
+                        'Scheduled stock exit %s deferred: %s; checking again in %ss',
+                        job['id'], exc, delay,
+                    )
                 self.ledger.save_exit_job(job)
 
     def _order(self, job, order_id, side='SELL'):
