@@ -3,7 +3,6 @@ from datetime import datetime
 from decimal import Decimal
 import logging
 import threading
-import time
 from uuid import uuid4
 
 from app.broker.quotes import current_stock_quote
@@ -13,19 +12,7 @@ from app.persistence.ledger import Ledger
 
 
 class CashStockExecution(StockExecution):
-    # Webull production Order Detail permits 2 requests per 2 seconds.
-    # All cash workers in this process share pacing; the ledger lock excludes
-    # simultaneous cash reconciliation across processes sharing the database.
-    _query_lock = threading.Lock()
-    _next_query_at = 0.0
-
-    def order(self, *args, **kwargs):
-        with self._query_lock:
-            delay = type(self)._next_query_at - time.monotonic()
-            if delay > 0:
-                time.sleep(delay)
-            type(self)._next_query_at = time.monotonic() + 1.05
-            return super().order(*args, **kwargs)
+    """Uses shared stock order-detail pacing."""
 
 
 class CashExitScheduler(ExitScheduler):

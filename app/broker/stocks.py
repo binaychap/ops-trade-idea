@@ -6,6 +6,8 @@ and https://developer.webull.com/apis/docs/reference/account-position.md
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+import threading
+import time
 
 TERMINAL = frozenset({'FILLED', 'CANCELLED', 'FAILED'})
 KNOWN_STATUSES = TERMINAL | {'PENDING', 'SUBMITTED', 'PARTIAL_FILLED'}
@@ -50,12 +52,27 @@ class StockOrder:
 
 
 class StockExecution:
+    # Shared by stock entry/exit callers in this process. Leave margin around
+    # the production order-detail quota; other hosts must coordinate separately.
+    _detail_lock = threading.Lock()
+    _next_detail_at = 0.0
+
+    def _order_detail(self, account_id, order_id):
+        with StockExecution._detail_lock:
+            delay = StockExecution._next_detail_at - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            try:
+                return self.client.order_v3.get_order_detail(account_id, order_id)
+            finally:
+                StockExecution._next_detail_at = time.monotonic() + 2.1
+
     def __init__(self, client):
         self.client = client
 
     def order(self, account_id, order_id, symbol, side, *, cash_amount=None):
         try:
-            response = self.client.order_v3.get_order_detail(account_id, order_id)
+            response = self._order_detail(account_id, order_id)
         except Exception as exc:
             if is_order_not_found(getattr(exc, 'error_code', None), getattr(exc, 'error_msg', '')):
                 raise OrderNotFound('Webull cannot find the saved order ID') from None
@@ -79,7 +96,14 @@ class StockExecution:
         # Never interpret a missing fill count as zero, including cancelled orders.
         filled = quantity(raw['filled_quantity'])
         if cash_amount is not None:
-            if raw.get('entrust_type') != 'AMOUNT' or quantity(raw['total_cash_amount']) != Decimal(str(cash_amount)):
+            if raw.get('entrust_type') != 'AMOUNT':
+                raise ValueError('Cash order differs from persisted intent')
+            expected_cash = quantity(cash_amount)
+            if expected_cash <= 0:
+                raise ValueError('Invalid persisted cash amount')
+            # Order-detail responses need not echo the placement cash amount.
+            # Identity and actual fills remain mandatory; validate any echo supplied.
+            if 'total_cash_amount' in raw and quantity(raw['total_cash_amount']) != expected_cash:
                 raise ValueError('Cash order differs from persisted intent')
             # Cash orders have no fixed requested share count. Reconcile actual fills.
             total = filled

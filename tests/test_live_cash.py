@@ -322,3 +322,55 @@ def test_crash_leaves_unsubmitted_cash_legs_unsubmitted(tmp_path):
     scheduler.run_once(NOW)
     broker.order.assert_called_once()
     assert ledger.exit_jobs()[0]['entries'][1]['submission_status'] == 'not_submitted'
+
+
+@pytest.mark.parametrize('echo', [None, '100', '99'])
+def test_cash_detail_optional_amount_echo(echo, monkeypatch):
+    raw = dict(client_order_id='entry', symbol='AAPL', side='BUY',
+               instrument_type='EQUITY', status='FILLED', filled_quantity='.5',
+               filled_price='200', entrust_type='AMOUNT')
+    if echo is not None:
+        raw['total_cash_amount'] = echo
+    broker = StockExecution(None)
+    monkeypatch.setattr(broker, '_order_detail', lambda *a: SimpleNamespace(
+        status_code=200, json=lambda: {'orders': [raw]}))
+    if echo == '99':
+        with pytest.raises(ValueError, match='persisted intent'):
+            broker.order('account', 'entry', 'AAPL', 'BUY', cash_amount='100')
+    else:
+        assert broker.order('account', 'entry', 'AAPL', 'BUY', cash_amount='100').filled == Decimal('.5')
+    del raw['filled_quantity']
+    with pytest.raises(KeyError):
+        broker.order('account', 'entry', 'AAPL', 'BUY', cash_amount='100')
+
+
+def test_cash_rate_limit_persists_queue_cooldown(tmp_path):
+    from datetime import timedelta
+    ledger, job, broker, scheduler, entry = setup_exit(tmp_path)
+    other = dict(job, id='another', symbol='MSFT')
+    ledger.register_exit_job(other)
+    broker.order.side_effect = RuntimeError('Webull request failed: HTTP 429')
+    scheduler.run_once(NOW)
+    assert broker.order.call_count == 1
+    assert all(j['next_check_at'] == (NOW + timedelta(seconds=60)).isoformat() for j in ledger.exit_jobs())
+    scheduler.run_once(NOW + timedelta(seconds=30))
+    assert broker.order.call_count == 1
+    scheduler.run_once(NOW + timedelta(seconds=60))
+    assert broker.order.call_count == 2
+    assert all(j['next_check_at'] == (NOW + timedelta(seconds=180)).isoformat() for j in ledger.exit_jobs())
+    broker.market_sell.assert_not_called()
+
+
+def test_order_detail_pacing_shared_between_instances(monkeypatch):
+    clock = [0.0]
+    waits = []
+    def sleep(seconds):
+        waits.append(seconds)
+        clock[0] += seconds
+    monkeypatch.setattr('app.broker.stocks.time.monotonic', lambda: clock[0])
+    monkeypatch.setattr('app.broker.stocks.time.sleep', sleep)
+    monkeypatch.setattr(StockExecution, '_next_detail_at', 0)
+    sdk = SimpleNamespace(order_v3=SimpleNamespace(get_order_detail=lambda *a: None))
+    StockExecution(sdk)._order_detail('a', 'one')
+    StockExecution(sdk)._order_detail('a', 'two')
+    assert waits == [2.1]

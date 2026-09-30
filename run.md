@@ -37,22 +37,22 @@ daily cap is $100. Credentials and account numbers are placeholders.
 
 ### Live flags and settings reference
 
-| Setting | Meaning | Code default |
-| --- | --- | --- |
-| `WEBULL_TRADING_MODE` | `live` selects production; `paper` selects sandbox. | `paper` |
-| `WEBULL_ENDPOINT` | Must match the mode; blank selects the matching host automatically. | Automatic |
-| `DRY_RUN` | `true` prevents application submissions; `false` permits orders in the selected environment. | `true` |
-| `DATABASE_PATH` | Use a separate live ledger, shared by all live workers that share a daily budget. | `bot.sqlite3` |
-| `WEBULL_LIVE_APP_KEY` / `WEBULL_LIVE_APP_SECRET` | Production credentials, required for live broker access. | Unset |
-| `WEBULL_PAPER_APP_KEY` / `WEBULL_PAPER_APP_SECRET` | Sandbox credentials; blank pair uses legacy `WEBULL_APP_KEY` / `WEBULL_APP_SECRET`. | Unset |
-| `WEBULL_LIVE_BULLISH_STOCK_ACCOUNT_NUMBER` | Live account for main bullish stock entries, manual stock API and morning sells. | Empty |
-| `WEBULL_LIVE_TOP_BULLISH_ACCOUNT_NUMBER` | Live account for the dedicated bullish runner. | Empty |
-| `WEBULL_LIVE_OPTIONS_MARGIN_ACCOUNT_NUMBER` | Live options account for enabled option strategies. | Empty |
-| `WEBULL_LIVE_BULLISH_AMOUNT_USD` | Requested cash per automated bullish stock purchase plan; minimum $5. | `100` |
-| `WEBULL_LIVE_BULLISH_DAILY_LIMIT_USD` | Daily stock-entry allowance; `0` blocks new automated live bullish stock buys. | `100` |
-| `WEBULL_LIVE_OPTIONS_DAILY_LIMIT_USD` | Independent daily options-entry allowance; `0` disables this cap. | `0` |
-| `WEBULL_LIVE_BEARISH_STOP_LOSS_ENABLED` | `false` omits new live PUT stop-loss legs while keeping profit legs; `true` includes stops. | `true` |
-| `WEBULL_LIVE_IRON_CONDOR_ENABLED` | `false` skips live neutral/IV Crush iron-condor entries; `true` permits the existing profit/stop bracket path. | `false` |
+| Setting                                            | Meaning                                                                                                        | Code default  |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------- |
+| `WEBULL_TRADING_MODE`                              | `live` selects production; `paper` selects sandbox.                                                            | `paper`       |
+| `WEBULL_ENDPOINT`                                  | Must match the mode; blank selects the matching host automatically.                                            | Automatic     |
+| `DRY_RUN`                                          | `true` prevents application submissions; `false` permits orders in the selected environment.                   | `true`        |
+| `DATABASE_PATH`                                    | Use a separate live ledger, shared by all live workers that share a daily budget.                              | `bot.sqlite3` |
+| `WEBULL_LIVE_APP_KEY` / `WEBULL_LIVE_APP_SECRET`   | Production credentials, required for live broker access.                                                       | Unset         |
+| `WEBULL_PAPER_APP_KEY` / `WEBULL_PAPER_APP_SECRET` | Sandbox credentials; blank pair uses legacy `WEBULL_APP_KEY` / `WEBULL_APP_SECRET`.                            | Unset         |
+| `WEBULL_LIVE_BULLISH_STOCK_ACCOUNT_NUMBER`         | Live account for main bullish stock entries, manual stock API and morning sells.                               | Empty         |
+| `WEBULL_LIVE_TOP_BULLISH_ACCOUNT_NUMBER`           | Live account for the dedicated bullish runner.                                                                 | Empty         |
+| `WEBULL_LIVE_OPTIONS_MARGIN_ACCOUNT_NUMBER`        | Live options account for enabled option strategies.                                                            | Empty         |
+| `WEBULL_LIVE_BULLISH_AMOUNT_USD`                   | Requested cash per automated bullish stock purchase plan; minimum $5.                                          | `100`         |
+| `WEBULL_LIVE_BULLISH_DAILY_LIMIT_USD`              | Daily stock-entry allowance; `0` blocks new automated live bullish stock buys.                                 | `100`         |
+| `WEBULL_LIVE_OPTIONS_DAILY_LIMIT_USD`              | Independent daily options-entry allowance; `0` disables this cap.                                              | `0`           |
+| `WEBULL_LIVE_BEARISH_STOP_LOSS_ENABLED`            | `false` omits new live PUT stop-loss legs while keeping profit legs; `true` includes stops.                    | `true`        |
+| `WEBULL_LIVE_IRON_CONDOR_ENABLED`                  | `false` skips live neutral/IV Crush iron-condor entries; `true` permits the existing profit/stop bracket path. | `false`       |
 
 The `WEBULL_LIVE_*` strategy switches and budgets apply only to live trading.
 Sandbox retains its existing entry and bracket behavior. Setting the options
@@ -198,7 +198,6 @@ this setting. Existing orders are not cancelled or modified, and the profit
 leg's existing time-in-force is unchanged. Bullish and iron-condor exits are
 unaffected. A disabled PUT stop is not replaced by an app-managed stop.
 
-
 ## Iron condors
 
 ```ini
@@ -276,3 +275,9 @@ visible and auto-refresh is enabled. Returning to a hidden tab refreshes only
 when the interval has elapsed. The Refresh button always allows a manual update.
 This controls local ledger reads, independently of feed polling and exit workers.
 Restart the app and reload the browser after changing this setting.
+
+## fix .env file malform
+
+cd ~/ops-paper-trade
+sed -i '/dashboard_refresh_interval_seconds/Id' .env
+head -1 .env

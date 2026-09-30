@@ -1,3 +1,35 @@
+## Live cash response and rate-limit repair (2026-09-30)
+
+Cash order parsing no longer requires total_cash_amount to be echoed by order
+detail; when present it must still match persisted intent. Client ID, symbol,
+side, instrument/order type, status, actual fill quantity and positive fill price
+for nonzero fills remain validated. Missing fills are never treated as zero.
+This addresses reported KeyError without guessing an alternate cash field.
+StockExecution now shares order-detail pacing across its instances/subclasses
+within a process, waiting 2.1s after each request. Scheduler HTTP 429 handling
+persists queue-wide cooldowns (60s doubling to 900s), preserves longer deferrals,
+stops that pass and resets retry count after successful reconciliation. Multiple
+hosts/direct SDK callers remain outside this limiter. No entry replay or runtime
+ledger changes. run.md documents deployment and limitations. Tests cover absent
+and mismatched cash echoes, missing fills, shared pacing and repeated 429 cooldown.
+Validation: 300 tests passed with local dotenv isolated; focused lint and diff
+checks passed. No production responses fetched, broker orders placed or services
+restarted.
+
+## End-to-end trading review (2026-09-30)
+
+trading-end-to-end.md documents current environment/credential/account routing,
+main and dedicated runners, alternate options, manual API, live cash splits,
+exits, daily reservations and operational limitations; linked from run.md.
+Source review supersedes older dedupe notes: main poller now checks ordered
+records, so skipped/failed records can be reconsidered subject to path-specific
+reservations; FORCE_REPROCESS still cannot bypass the inner ordered check.
+Main hours remain weekday/time-only; live cash uses XNYS. Manual stock tickets
+bypass automated cash sizing/daily cap. Alternate CALL premium remains a strike
+heuristic; legacy morning-sale reconciliation limitations remain unresolved.
+Documentation only. Full isolated suite: 295 passed (18 warnings); no broker
+requests, runtime-state changes, credential reads or service restarts.
+
 ## Configurable dashboard refresh (2026-09-28)
 
 DASHBOARD_REFRESH_INTERVAL_SECONDS defaults to 3600 and is set in local .env and
