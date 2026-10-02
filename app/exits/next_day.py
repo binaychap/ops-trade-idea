@@ -69,6 +69,7 @@ class ExitScheduler:
                     self.reconcile(job, now)
                     job['last_error'] = None
                     job['missing_order_checks'] = 0
+                    job['rate_limit_checks'] = 0
                     job['reconcile_failures'] = 0
                     job['next_check_at'] = None
                 except OrderNotFound as exc:
@@ -90,6 +91,26 @@ class ExitScheduler:
                         delay,
                     )
                 except Exception as exc:
+                    rate_limited = (str(getattr(exc, 'http_status', '')) == '429'
+                                    or getattr(exc, 'error_code', '') == 'TOO_MANY_REQUESTS'
+                                    or 'HTTP 429' in str(exc)
+                                    or 'TOO_MANY_REQUESTS' in str(exc))
+                    if rate_limited:
+                        checks = min(int(job.get('rate_limit_checks', 0)) + 1, 5)
+                        job['rate_limit_checks'] = checks
+                        deadline = now + timedelta(seconds=min(60 * 2 ** (checks - 1), 900))
+                        # Persist a cooldown for this queue, including across restarts.
+                        # Do not continue hammering the broker with the remaining jobs.
+                        for pending in self.jobs():
+                            if pending['id'] == job['id']:
+                                pending = job
+                            previous = pending.get('next_check_at')
+                            if not previous or datetime.fromisoformat(previous) < deadline:
+                                pending['next_check_at'] = deadline.isoformat()
+                            pending['last_error'] = 'Webull HTTP 429 rate limited exit reconciliation; retry scheduled'
+                            self.ledger.save_exit_job(pending)
+                        logger.warning('Webull rate limited exits; queue deferred until %s', deadline.isoformat())
+                        break
                     # Any other failure (broker schema drift, quote errors, ...)
                     # backs off exponentially instead of retrying every worker tick.
                     checks = min(int(job.get('reconcile_failures', 0)) + 1, 5)

@@ -9,3 +9,6 @@ logs/
 .env.example
 
 *.sqlite3.exits.lock
+
+bot-live.sqlite3
+bot-live.sqlite3.write.lock

@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -61,6 +62,15 @@ def make_ledger(tmp_path):
                  {'symbol': 'MSFT', 'quantity': 1, 'entry_price': 400.0})
     ledger.update('bullish-1', 'submitted')
     return ledger
+
+
+def test_morning_sell_does_not_start_for_live_accounts(monkeypatch, caplog):
+    from app import main
+
+    monkeypatch.setattr(main, 'get_settings', lambda: SimpleNamespace(
+        morning_sell_enabled=True, dry_run=False, webull_trading_mode='live'))
+    main.start_morning_sell()
+    assert 'disabled in live mode' in caplog.text
 
 
 def positions():

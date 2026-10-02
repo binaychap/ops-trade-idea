@@ -1,10 +1,9 @@
-"""Live-only bullish cash entries with durable intent and managed exits."""
+"""Live-only bullish cash entries with durable intent and manual exits."""
 from decimal import Decimal, ROUND_FLOOR
 from hashlib import sha256
 
 from app.broker.quotes import current_stock_quote
 from app.broker.stocks import StockExecution, checked_json
-from app.config.strategy import exit_percentages
 from app.exits.next_day import ExitCalendar
 from app.persistence.ledger import Ledger
 
@@ -56,7 +55,7 @@ def submit_live_stock(symbol, settings, fingerprint, *, account_resolver,
     result = {'dry_run': settings.dry_run, 'client_order_id': order_id,
               'id': order_id, 'symbol': symbol, 'side': 'BUY', 'broker': 'webull',
               'notional_usd': float(amount), 'order': request,
-              'exit_management': 'application', 'status': 'dry_run' if settings.dry_run else 'submitted'}
+              'exit_management': 'manual', 'status': 'dry_run' if settings.dry_run else 'submitted'}
     if settings.dry_run:
         result['requires_quote_for_split'] = True
         return result
@@ -89,23 +88,23 @@ def submit_live_stock(symbol, settings, fingerprint, *, account_resolver,
     ledger = Ledger(settings.database_path)
     with ledger.exit_worker_lock() as acquired:
         if not acquired:
-            return {'skipped': True, 'reason': 'Stock exit worker busy'}
-        if ledger.has_active_exit_job(account_id=account_id, symbol=symbol):
+            return {'skipped': True, 'reason': 'Stock submission lock busy'}
+        if any(job.get('kind') != 'live_cash'
+               and job.get('account_id') == account_id
+               and job.get('symbol') == symbol
+               for job in ledger.exit_jobs()):
             return {'skipped': True, 'reason': 'Stock already has an active exit job'}
         if broker.position(account_id, symbol) != 0:
             return {'skipped': True, 'reason': 'Live cash entry requires a flat stock position'}
         if not market_open():
             return {'skipped': True, 'reason': 'outside_market_hours'}
-        profit, stop = exit_percentages(settings, 'bullish')
         job = {
             'id': order_id, 'kind': 'live_cash', 'account_id': account_id,
             'symbol': symbol, 'entry_id': order_id, 'status': 'waiting_entry',
+            'manage_exits': False,
             'cash_amount': str(amount), 'quantity': '0', 'market_orders': [],
             'entries': [{'id': row['client_order_id'], 'cash_amount': row['total_cash_amount'],
                          'submission_status': 'planned'} for row in orders],
-            'profit_percent': profit, 'stop_loss_percent': stop,
-            'next_day_exit': getattr(settings, 'next_day_exit_enabled', False),
-            'exit_time': getattr(settings, 'next_day_exit_time', '09:35'),
             'due_at': None, 'last_error': None,
         }
         from app.execution.daily_budget import reserve_daily_budget, DailyBudgetExceeded
@@ -149,6 +148,8 @@ def submit_live_stock(symbol, settings, fingerprint, *, account_resolver,
                 job['status'] = 'complete'
                 ledger.save_exit_job(job)
                 return {'skipped': True, 'reason': 'outside_market_hours'}
+            job['status'] = 'manual_management'
+            ledger.save_exit_job(job)
         except Exception:
             job['last_error'] = 'Entry submission unconfirmed; reconcile the saved client order ID before retrying'
             ledger.save_exit_job(job)

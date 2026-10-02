@@ -132,6 +132,7 @@ def trade_status():
             'attention': sum(record['status'] == 'failed' or bool((record['exit'] or {}).get('last_error')) for record in records),
         },
         'settings': {
+            'dashboard_refresh_interval_seconds': settings.dashboard_refresh_interval_seconds,
             'dry_run': settings.dry_run,
             'scheduler_enabled': settings.next_day_exit_enabled,
             'scheduler_running': settings.next_day_exit_enabled and not settings.dry_run,

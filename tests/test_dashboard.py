@@ -13,6 +13,7 @@ from app.persistence.ledger import Ledger
 def dashboard(tmp_path, monkeypatch):
     database = tmp_path / 'dashboard.sqlite3'
     settings = SimpleNamespace(database_path=str(database), dry_run=True,
+                               dashboard_refresh_interval_seconds=3600,
                                next_day_exit_enabled=True, next_day_exit_time='09:35',
                                next_day_exit_timezone='America/New_York')
     monkeypatch.setattr(main, 'get_settings', lambda: settings)

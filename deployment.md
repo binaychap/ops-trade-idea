@@ -35,7 +35,7 @@ Use **Compute → Instances → Create instance** in your home region.
 
 | Setting                                   | Suggested choice                                |
 | ----------------------------------------- | ----------------------------------------------- |
-| Name                                      | `ops-trade-idea`                               |
+| Name                                      | `ops-trade-idea`                                |
 | Image                                     | Oracle Linux 9                                  |
 | Shape                                     | Always Free-eligible `VM.Standard.A1.Flex`      |
 | CPU / memory                              | Start with 1 OCPU and 4 GB RAM                  |
@@ -317,6 +317,8 @@ The app reads `.env` from its working directory.
 sudo systemctl daemon-reload
 sudo systemctl enable --now ops-trade-idea
 sudo systemctl status ops-trade-idea
+sudo systemctl stop ops-trade-idea
+sudo systemctl start ops-trade-idea
 sudo journalctl -u ops-trade-idea -n 100 --no-pager
 ```
 
@@ -398,6 +400,14 @@ complete cross-strategy duplicate/position guard.
 - Before updating code, stop the relevant services, back up state, pull the
   intended revision, run `uv sync --locked`, validate, and restart.
 - Restart services after changing `.env`; do not start a second manual runner.
+
+Live cash-exit HTTP 429 responses are recognized by status or the
+`TOO_MANY_REQUESTS` code. The worker persists a queue-wide cooldown and stops
+that reconciliation pass. If logs instead show each `Scheduled stock exit ...
+deferred` independently, the service is running an older checkout; update the
+repo and restart every service that runs the cash-exit worker (API and bullish
+runner, if enabled). After restart, expect one `Webull rate limited exits;
+queue deferred` warning per 429 event rather than a per-job deferral.
 
 Useful commands:
 

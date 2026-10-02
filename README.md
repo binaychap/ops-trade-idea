@@ -400,13 +400,13 @@ The `Ledger` class manages SQLite tables:
 The ledger tracks each idea by `trade_id`. These statuses describe application
 processing, not the broker's execution or fill status:
 
-| Status | Definition |
-| --- | --- |
-| `queued` | The idea has been saved for processing, but no final outcome has been recorded yet. It does not mean an order is queued at Webull. A stopped process can leave this status behind. |
-| `ordered` | The non-dry-run submission returned successfully and the app recorded the result. This does **not** confirm that the order filled or that the position is closed. Check Webull for execution status. |
-| `failed` | An exception interrupted processing or submission. Check application logs and any stored error details. In `main.py`, this alone does **not** prove that Webull rejected or never received the order; a timeout can leave the broker outcome uncertain. |
-| `skipped` | The app chose not to submit an order for this processing attempt, for example because price levels were invalid, the symbol did not match, or the market was closed. Inspect the decision rationale or stored skip reason. |
-| `dry_run` | The app prepared a simulated order with `DRY_RUN=true`; it did not submit it to Webull. |
+| Status    | Definition                                                                                                                                                                                                                                              |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `queued`  | The idea has been saved for processing, but no final outcome has been recorded yet. It does not mean an order is queued at Webull. A stopped process can leave this status behind.                                                                      |
+| `ordered` | The non-dry-run submission returned successfully and the app recorded the result. This does **not** confirm that the order filled or that the position is closed. Check Webull for execution status.                                                    |
+| `failed`  | An exception interrupted processing or submission. Check application logs and any stored error details. In `main.py`, this alone does **not** prove that Webull rejected or never received the order; a timeout can leave the broker outcome uncertain. |
+| `skipped` | The app chose not to submit an order for this processing attempt, for example because price levels were invalid, the symbol did not match, or the market was closed. Inspect the decision rationale or stored skip reason.                              |
+| `dry_run` | The app prepared a simulated order with `DRY_RUN=true`; it did not submit it to Webull.                                                                                                                                                                 |
 
 The bullish runner uses `submitted` instead of `ordered`, and uses
 `submission_unknown` when an exception occurs after its submission callback.
@@ -616,11 +616,11 @@ services after changing these values; existing broker orders are not modified.
 
 ## Strategy account selection
 
-| Execution path | Account setting |
-| --- | --- |
-| `main.py` bullish stock branch | `BULLISH_STOCK_ACCOUNT_NUMBER` |
-| `main-top-bullish.py` stock runner | `TOP_BULLISH_ACCOUNT_NUMBER` |
-| Bearish PUT via `main.py` or `main-option.py` | `OPTIONS_MARGIN_ACCOUNT_NUMBER` |
+| Execution path                                  | Account setting                 |
+| ----------------------------------------------- | ------------------------------- |
+| `main.py` bullish stock branch                  | `BULLISH_STOCK_ACCOUNT_NUMBER`  |
+| `main-top-bullish.py` stock runner              | `TOP_BULLISH_ACCOUNT_NUMBER`    |
+| Bearish PUT via `main.py` or `main-option.py`   | `OPTIONS_MARGIN_ACCOUNT_NUMBER` |
 | Neutral iron condor via either main entry point | `OPTIONS_MARGIN_ACCOUNT_NUMBER` |
 
 These paths share `app.broker.client.get_account_id(account_number=...)`.
@@ -668,7 +668,6 @@ Neutral iron-condor submissions use the independent
 must have valid bid/ask prices and timestamps within this limit. The five-second
 future tolerance remains unchanged. Credit and exit prices use those delayed
 premiums. Restart the service to apply changes.
-
 
 ## Package layout
 
@@ -769,36 +768,22 @@ debit including fees. See [Webull stock order rules](https://developer.webull.co
 
 Each cash leg is persisted before its own broker request. If the market closes,
 a request fails or the process stops mid-plan, unsent legs are abandoned rather
-than replayed. This can leave less than $100 invested; attempted legs still need
-reconciliation. All confirmed entry fills contribute to a weighted average entry
-price for exits. Sell orders close whole shares first, then the fractional
-remainder, reconciling each before sending the next. Production order-detail
-requests from cash workers are paced to respect the documented query limit;
-large plans can make a reconciliation cycle longer than the 10-second interval.
+than replayed. This can leave less than $100 invested. The app does not poll or
+cancel submitted cash orders; check uncertain or partial orders manually in
+Webull before placing another order. Live cash buys have no app-managed profit,
+stop-loss, next-day, or morning sell triggers. Monitor and close positions
+manually. Existing paper bracket/exit behavior remains unchanged.
 
-Fractional entries have **app-managed exits, not broker-held brackets**. A worker
-runs every 10 seconds during an XNYS regular session, tracks confirmed fills and
-uses the actual average fill price for the configured bullish profit/stop
-percentages. Triggers submit a market sell of the remaining confirmed shares;
-execution price is not guaranteed. Fresh quote failures defer price exits.
-Configured next-day deadlines and morning-sell requests also use this worker.
-Partially filled entries are cancelled before liquidating their confirmed fills.
-
-Keep either the FastAPI service or continuous bullish runner running with the
-same live database. Live non-dry-run `--once` is rejected because it would stop
-exit monitoring. Application outages, closed sessions or broker/quote failures
-can delay exits. Existing paper bracket/exit behavior remains unchanged.
-
-Entries require a flat position and no active exit job for that account/symbol.
-Order intent and client IDs are persisted before submission. An ambiguous entry
-or sell response is reconciled by its saved ID; it is never blindly retried.
-Missing orders require reconciliation, not deletion of reservations. Confirmed
-terminal partial sells can submit only the unfilled remainder. Cash jobs are
-stored in `scheduled_stock_exits` with `kind=live_cash`; the regular bracket
-scheduler leaves them to the cash worker. All workers share the database exit
-lock. `DRY_RUN=true` previews the cash request without broker calls, reservations,
-or live quote/eligibility validation; the exact split is deferred until a fresh
-quote is available. Tests use fake clients; live acceptance and
+Entries require a flat broker position and no active non-cash exit job for that
+account/symbol. Order intent and client IDs are persisted before submission;
+the permanent reservation prevents replaying the same attempt. Ambiguous entry
+responses are not reconciled by the app; check the saved client order ID in
+Webull before taking further action. Cash rows remain in `scheduled_stock_exits`
+with `kind=live_cash` for audit and to exclude those tracked holdings from the
+optional automatic morning-sell path. No worker polls them. `DRY_RUN=true`
+previews the cash request without broker calls, reservations, or live
+quote/eligibility validation; the exact split is deferred until a fresh quote is
+available. Tests use fake clients; live acceptance and
 broker response fields have not been verified with a real order.
 
 Daily live entry limits are configured separately for bullish stocks and options.

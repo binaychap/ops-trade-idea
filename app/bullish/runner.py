@@ -73,8 +73,6 @@ class MainTopBullish:
         next_run = time.monotonic()
         cycle = 0
         logger.info('Bullish scheduler started: interval=300s; press Ctrl+C to stop')
-        from app.exits.live_cash import start_cash_exit_worker
-        worker = start_cash_exit_worker(getattr(self, 'settings', None))
         try:
             while True:
                 cycle += 1
@@ -97,10 +95,6 @@ class MainTopBullish:
                 time.sleep(next_run - now)
         except KeyboardInterrupt:
             logger.info('Bullish-flow scheduler stopped')
-        finally:
-            if worker:
-                worker[0].set()
-                worker[1].join(timeout=5)
 
     def run(self, *, limit=10):
         """Process feed symbols once using fresh Webull quotes as limit prices."""
@@ -242,7 +236,7 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
     runner = MainTopBullish()
     if args.once and runner.settings.webull_trading_mode == 'live' and not runner.settings.dry_run:
-        parser.error('Live cash trading requires continuous execution for managed exits; omit --once')
+        parser.error('Live cash trading requires continuous execution for order reconciliation; omit --once')
     if args.once:
         print(json.dumps(runner.run(limit=args.limit), indent=2), flush=True)
     else:
