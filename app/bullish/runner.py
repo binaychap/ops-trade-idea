@@ -73,8 +73,6 @@ class MainTopBullish:
         next_run = time.monotonic()
         cycle = 0
         logger.info('Bullish scheduler started: interval=300s; press Ctrl+C to stop')
-        from app.exits.live_cash import start_cash_exit_worker
-        worker = start_cash_exit_worker(getattr(self, 'settings', None))
         try:
             while True:
                 cycle += 1
@@ -97,10 +95,6 @@ class MainTopBullish:
                 time.sleep(next_run - now)
         except KeyboardInterrupt:
             logger.info('Bullish-flow scheduler stopped')
-        finally:
-            if worker:
-                worker[0].set()
-                worker[1].join(timeout=5)
 
     def run(self, *, limit=10):
         """Process feed symbols once using fresh Webull quotes as limit prices."""

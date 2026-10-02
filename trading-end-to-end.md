@@ -146,37 +146,20 @@ split is not a guarantee of broker acceptance. Quote failure prevents entry.
 
 The dedicated runner also permanently claims trade IDs/symbols in its own table.
 Its failed or dry-run claims can prevent subsequent attempts for that symbol.
-Live non-dry-run `--once` is rejected because managed exits need a running worker.
+Live `--once` is allowed; order status and position exits are handled manually.
 
 Source: [live cash entries](app/execution/live_stock.py),
 [bullish runner](app/bullish/runner.py), [quotes](app/broker/quotes.py).
 
-## 6. Profit, stop and time-based exits
+## 6. Live cash stock exits
 
-### Live cash stocks
-
-The app manages exits; these entries do not include broker-held profit/stop brackets.
-The live non-dry-run worker normally checks every 10 seconds:
-
-- An idle ledger with no unfinished `live_cash` jobs does not initialize a broker client.
-- Pending jobs are reconciled against broker order details, including partial fills.
-- Profit/stop thresholds are calculated from the actual weighted average fill price.
-- Fresh stock quotes (maximum age 60 seconds) trigger percentage exits during open
-  sessions. Default bullish profit is 10%; stop is 5%.
-- At a $30 average fill, the thresholds are $33 and $28.50. Triggering submits a
-  market sell; its fill price can differ from the observed quote.
-- Outstanding entry portions must reach terminal state before liquidation proceeds.
-- Existing sell attempts are reconciled before another sale. Whole shares are sold
-  first, then a fractional remainder after confirmation. Holdings must cover the
-  tracked remainder; inconsistencies require reconciliation.
-- Optional next-day deadline or morning liquidation requests can trigger without
-  needing a new price quote, but still require an open session and broker access.
-
-The process must remain running. Missing/stale quotes defer price-triggered exits.
-An initialization 401 logs that monitoring is unavailable and retries after 60 seconds.
-Order-detail calls share process-wide pacing; 429 failures defer the scheduler
-queue with persisted exponential backoff from 60 seconds up to 15 minutes.
-Unconfirmed orders are not assumed cancelled and are not blindly resubmitted.
+Live cash stock buys are market orders without app-managed profit, stop-loss,
+next-day, or morning exits. The live-cash status worker has been removed. The app
+does not poll order status, cancel partially filled buys, or submit sells. Check
+ambiguous submissions and open orders manually in Webull; sell positions there
+as well. Cash intent records remain for audit and the optional morning-sell path
+skips tracked cash holdings. Existing broker orders and saved database rows are
+not cancelled or deleted by this change.
 
 ### Paper stock brackets and scheduled exits
 
@@ -197,14 +180,15 @@ There is no replacement app-managed PUT stop. Existing broker orders are unchang
 `WEBULL_LIVE_IRON_CONDOR_ENABLED=false` skips new live condors entirely; default false.
 True restores their original profit/stop construction. Paper ignores this live flag.
 
-`MORNING_SELL_ENABLED` defaults false. When enabled, the worker targets equity
-holdings in the configured main stock account, including manual/untracked holdings.
-It delegates active cash jobs to the cash exit worker. The legacy direct-sale path
-has weaker reconciliation: it does not cancel all bracket exits or confirm fills
-before marking records complete. Treat this as an unresolved limitation.
+`MORNING_SELL_ENABLED` defaults false. In live mode, the application does not
+start this worker; live stock positions are manually managed in Webull. In paper
+mode, when enabled, it targets equity holdings in the configured main stock
+account, including manual/untracked holdings. It skips active `live_cash` records.
+The legacy paper direct-sale path has weaker reconciliation: it does not cancel
+all bracket exits or confirm fills before marking records complete.
 
-Source: [cash exits](app/exits/live_cash.py), [next-day exits](app/exits/next_day.py),
-[morning sells](app/exits/morning_sell.py), [stock broker adapter](app/broker/stocks.py).
+Source: [next-day exits](app/exits/next_day.py), [morning sells](app/exits/morning_sell.py),
+[stock broker adapter](app/broker/stocks.py).
 
 ## 7. Daily limits
 

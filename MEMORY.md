@@ -1,4 +1,17 @@
-## Live cash response and rate-limit repair (2026-09-30)
+## Live-cash worker removed (2026-10-02)
+
+The live-cash status/exit worker and its FastAPI/bullish-runner startup hooks are
+removed. Live stock buys still submit market cash orders and persist intent and
+permanent fingerprints, but the app no longer polls buy/sell status, cancels
+partial buys, or submits sells. Active live_cash records remain for audit and
+morning-sell exclusion; they do not block another buy when the broker reports
+the account/symbol position is flat. Live-mode startup also skips the optional
+morning-sell worker, so live positions remain manually managed in Webull. Paper
+morning sells remain enabled. Live `--once` is allowed. Validation: 75 cash,
+morning-sell and next-day tests passed; scoped Ruff and Pylance checks passed.
+Existing database rows were not altered; no broker orders were placed.
+
+## Historical live cash response and rate-limit repair (2026-09-30)
 
 Live bullish cash entries remain market cash-amount orders, but no longer get
 app-managed profit, stop-loss, next-day, or morning sell triggers. Cash jobs are
@@ -82,7 +95,7 @@ changed, no broker calls or service restarts. run.md includes troubleshooting.
 
 ## Consolidated live configuration reference (2026-09-28)
 
-run.md now includes all WEBULL_LIVE_* fields in one example, a settings/defaults
+run.md now includes all `WEBULL_LIVE_*` fields in one example, a settings/defaults
 table, switch interactions, and date-based daily allowance reset behavior. The
 example uses $100 per stock and a $1,000 daily cap, distinguished from the $100
 code-default daily cap. Account/credential examples remain placeholders.
@@ -127,12 +140,12 @@ No broker calls/orders or service restarts were made.
 
 ## Daily live entry budgets (2026-09-28)
 
-app/execution/daily_budget.py atomically reserves integer cents under SQLite
+`app/execution/daily_budget.py` atomically reserves integer cents under SQLite
 BEGIN IMMEDIATE in daily_entry_budgets. WEBULL_LIVE_BULLISH_DAILY_LIMIT_USD defaults
 100 and caps total requested cash plans across both automated bullish stock paths
 and accounts sharing the database. Stock cap 0 blocks entries. Independent
 WEBULL_LIVE_OPTIONS_DAILY_LIMIT_USD defaults 0 (disabled pending user choice).
-CALL/PUT builders and standalone option buy reserve premium * contracts * 100;
+CALL/PUT builders and standalone option buy reserve premium times contracts times 100;
 iron-condor builder reserves maximum defined loss. Option guards read the same
 process environment/database path as broker clients. Stock helper uses settings.
 .env has stock cap 100 and options cap 0; per-stock amount stays 100.
@@ -154,7 +167,7 @@ credentials/accounts/databases, application launch commands and restart behavior
 Examples contain placeholders only. Documentation change; no local environment
 values, services or broker orders changed.
 
-## Live bullish cash entries and managed exits (2026-09-28)
+## Historical live bullish cash entries and managed exits (2026-09-28; superseded 2026-10-02)
 
 app/execution/live_stock.py submits live-only automated bullish stock entries as
 NORMAL MARKET DAY CORE AMOUNT orders. WEBULL_LIVE_BULLISH_AMOUNT_USD defaults to
@@ -165,30 +178,23 @@ cash orders each >=$5 and below one share. $30 uses four $25 orders; $100 uses t
 $50 orders. Quotes at/below $5 cannot meet both rules and skip. All planned cash
 amounts sum to the configured budget, but interrupted/failed plans may invest less.
 Each leg is persisted before submission; unsent legs after interruption are never
-replayed. Worker reconciles each attempted leg and aggregates fills/weighted prices.
-Exits sell whole shares then fractional remainder separately. Cash worker order
-detail calls use process-shared 1.05-second pacing (Webull limit 2/2s).
+replayed. At that time, a worker reconciled attempted legs and aggregated fills;
+it could also sell whole shares and then fractional remainders. That worker was
+removed on 2026-10-02.
 Amount must fit configured/decision budgets. Dry runs are broker-free previews.
 
-Cash orders use app-managed percentage exits based on actual average fills, not
-broker brackets. app/exits/live_cash.py runs every 10 seconds under live non-dry-run
-FastAPI/continuous bullish runner processes. Requires running app and valid fresh
-quotes during XNYS hours. Live --once is rejected. Positions must be flat before
-entry. Permanent entry reservation and kind=live_cash exit jobs precede broker
-submission; ambiguous results never replay. Actual fractional fills are retained
-as Decimal; entry partials cancel before exit, confirmed terminal partial sells
-can sell remaining fills. Next-day settings remain supported; morning sells
-delegate cash jobs instead of marking them complete on submission. Legacy exit
-scheduler skips cash jobs; all share existing exit-worker file lock. No schema
-migration. Strict broker cash response parsing remains unverified live. No broker
-requests/orders or service restarts. README records supported scope and limits.
+Cash entries previously used app-managed percentage exits based on actual average
+fills, not broker brackets. Live stock entries now require manual monitoring and
+closing. Positions must be flat before entry. Permanent entry reservations and
+kind=live_cash audit rows precede broker submission; ambiguous attempts never
+replay automatically. No runtime database migration or row cleanup was performed.
 Validation: 260 tests pass with local dotenv loading isolated, including 32 cash
 entry/exit tests covering split budgets, unique IDs, interrupted plans and combined
 position exits. Compilation, focused Ruff and diff whitespace checks pass.
 
 ## Environment-specific Webull accounts (2026-09-28)
 
-Shared strategy settings now select WEBULL_PAPER_ or WEBULL_LIVE_ variants of
+Shared strategy settings now select `WEBULL_PAPER_` or `WEBULL_LIVE_` variants of
 BULLISH_STOCK_ACCOUNT_NUMBER, TOP_BULLISH_ACCOUNT_NUMBER and
 OPTIONS_MARGIN_ACCOUNT_NUMBER according to WEBULL_TRADING_MODE. Legacy account
 fields are paper-only fallbacks; missing live accounts block the corresponding
@@ -507,7 +513,6 @@ Polling and submission both check weekday 09:30–16:00 ET hours. Initial dedupe
 now calls `has_ordered_trade`; when ID and symbol are supplied, both must match
 an ordered row. Static source verification only; no broker orders were placed.
 
-
 Bearish entries now use the selected PUT contract's current snapshot ask instead
 of the strike-based premium estimate. The SDK option snapshot must match the
 contract and supply a positive finite ask and quote_time within 60 seconds
@@ -577,16 +582,16 @@ the Webull OpenAPI Python SDK. Development dependencies: pytest and Ruff.
 
 Settings reads `.env` and process environment. Defaults in source:
 
-| Variable | Default |
-| --- | --- |
-| `DRY_RUN` | `true` |
-| `MAX_NOTIONAL_USD` | `250` |
-| `ALLOW_SHORT_SELLING` | `false` |
-| `FORCE_REPROCESS` | `false` |
-| `OPTIONOMICS_POLL_ENABLED` | `true` |
-| `OPTIONOMICS_POLL_INTERVAL_SECONDS` | `600` |
-| `WEBULL_ENDPOINT` | `api.sandbox.webull.com` |
-| `DATABASE_PATH` | `bot.sqlite3` |
+| Variable                            | Default                  |
+| ----------------------------------- | ------------------------ |
+| `DRY_RUN`                           | `true`                   |
+| `MAX_NOTIONAL_USD`                  | `250`                    |
+| `ALLOW_SHORT_SELLING`               | `false`                  |
+| `FORCE_REPROCESS`                   | `false`                  |
+| `OPTIONOMICS_POLL_ENABLED`          | `true`                   |
+| `OPTIONOMICS_POLL_INTERVAL_SECONDS` | `600`                    |
+| `WEBULL_ENDPOINT`                   | `api.sandbox.webull.com` |
+| `DATABASE_PATH`                     | `bot.sqlite3`            |
 
 Feed credentials use `OPTIONOMICS_API_KEY` and `OPTIONOMICS_EMAIL`; the URL
 uses `OPTIONOMICS_API_URL`. Broker credentials use `WEBULL_APP_KEY` and
