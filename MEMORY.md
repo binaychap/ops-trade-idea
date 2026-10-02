@@ -19,7 +19,10 @@ premium cannot be reserved before fill. Webull may definitively reject MARKET
 for limited-liquidity options with
 `OPENAPI_OPTION_NOT_ALLOW_PLACING_MARKET_ORDER` (HTTP 417); that response now
 sets `entry_rejected`, prevents repeated order-detail lookups, and returns a
-logged skip. Persisted jobs with this error are repaired on next poll. No
+logged skip. The original submission error is retained separately from later
+reconciliation errors. Legacy jobs that only report `OPENAPI_PARAM_ERR` / `Order
+not present` stop after three lookups as `entry_unresolved` and require manual
+Webull reconciliation. No
 automatic LIMIT fallback is safe until option quote entitlement or an explicit
 approved limit is available. Official Webull docs list option MARKET orders and
 order detail `filled_price`, but contract-level support varies. Mocked rejection

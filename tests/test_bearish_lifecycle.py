@@ -214,6 +214,99 @@ def test_stuck_market_rejection_is_repaired_from_saved_error(tmp_path):
     assert ledger.bearish_option_jobs() == []
 
 
+def test_reconciler_repairs_stuck_market_rejection_without_order_lookup(tmp_path):
+    ledger = Ledger(str(tmp_path / "trades.sqlite3"))
+    job = {
+        "job_id": "stuck-job",
+        "status": "entry_submitting",
+        "trade_id": "stuck-trade",
+        "symbol": "CTVA",
+        "contract_symbol": "CTVA261016P00010000",
+        "entry_client_order_id": "rejected-client-id",
+        "last_error": (
+            "HTTP Status: 417, Code: "
+            "OPENAPI_OPTION_NOT_ALLOW_PLACING_MARKET_ORDER"
+        ),
+        "next_attempt_at": None,
+    }
+    assert ledger.register_bearish_option_job("stuck-job", job)
+
+    class NoLookupOrderApi:
+        def get_order_detail(self, *args):
+            raise AssertionError("Known market rejection must not query order detail")
+
+    lifecycle = BearishPutLifecycle(
+        ledger,
+        trade_client=SimpleNamespace(order_v3=NoLookupOrderApi()),
+        option_module=object(),
+    )
+
+    lifecycle.reconcile(job)
+
+    repaired = ledger.bearish_option_job("stuck-job")
+    assert repaired["status"] == "entry_rejected"
+    assert repaired["rejection_code"] == "OPENAPI_OPTION_NOT_ALLOW_PLACING_MARKET_ORDER"
+    assert ledger.bearish_option_jobs() == []
+
+
+def test_detail_not_present_preserves_known_market_rejection(tmp_path):
+    ledger = Ledger(str(tmp_path / "trades.sqlite3"))
+    rejection = (
+        "HTTP Status: 417, Code: "
+        "OPENAPI_OPTION_NOT_ALLOW_PLACING_MARKET_ORDER"
+    )
+    job = {
+        "job_id": "known-reject",
+        "status": "entry_submitting",
+        "trade_id": "known-reject-trade",
+        "symbol": "CTVA",
+        "last_error": rejection,
+        "submission_error": rejection,
+        "entry_client_order_id": "not-accepted",
+        "next_attempt_at": None,
+    }
+    assert ledger.register_bearish_option_job("known-reject", job)
+    lifecycle = BearishPutLifecycle(ledger, trade_client=object(), option_module=object())
+    not_present = ServerException(
+        "OPENAPI_PARAM_ERR", "Parameter error, Order not present.", http_status=417,
+    )
+
+    lifecycle._defer(job, not_present)
+
+    saved = ledger.bearish_option_job("known-reject")
+    assert saved["status"] == "entry_rejected"
+    assert saved["last_error"] == rejection
+    assert saved["rejection_code"] == "OPENAPI_OPTION_NOT_ALLOW_PLACING_MARKET_ORDER"
+    assert ledger.bearish_option_jobs() == []
+
+
+def test_legacy_order_not_present_retries_are_bounded(tmp_path):
+    ledger = Ledger(str(tmp_path / "trades.sqlite3"))
+    job = {
+        "job_id": "legacy-not-found",
+        "status": "entry_submitting",
+        "trade_id": "legacy-trade",
+        "symbol": "CTVA",
+        "entry_client_order_id": "missing-order",
+        "last_error": "Earlier error unavailable in legacy record",
+        "next_attempt_at": None,
+    }
+    assert ledger.register_bearish_option_job("legacy-not-found", job)
+    lifecycle = BearishPutLifecycle(ledger, trade_client=object(), option_module=object())
+    not_present = ServerException(
+        "OPENAPI_PARAM_ERR", "Parameter error, Order not present.", http_status=417,
+    )
+
+    for _ in range(3):
+        lifecycle._defer(job, not_present)
+
+    saved = ledger.bearish_option_job("legacy-not-found")
+    assert saved["status"] == "entry_unresolved"
+    assert saved["order_not_present_count"] == 3
+    assert saved["next_attempt_at"] is None
+    assert ledger.bearish_option_jobs() == []
+
+
 def test_submitter_returns_market_order_rejection_as_skipped(monkeypatch, tmp_path):
     from app.execution import submitter
 

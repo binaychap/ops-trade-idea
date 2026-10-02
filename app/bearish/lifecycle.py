@@ -20,6 +20,8 @@ _next_detail_at = 0.0
 _KNOWN_STATUSES = {"PENDING", "SUBMITTED", "PARTIAL_FILLED", "FILLED", "CANCELLED", "FAILED"}
 _TERMINAL_STATUSES = {"FILLED", "CANCELLED", "FAILED"}
 _MARKET_ORDER_UNSUPPORTED = "OPENAPI_OPTION_NOT_ALLOW_PLACING_MARKET_ORDER"
+_ORDER_NOT_PRESENT = "OPENAPI_PARAM_ERR"
+_MAX_ORDER_NOT_PRESENT_RETRIES = 3
 
 
 def _new_order_id() -> str:
@@ -30,6 +32,13 @@ def _is_market_order_unsupported(exc: BaseException | str) -> bool:
     return (
         getattr(exc, "error_code", None) == _MARKET_ORDER_UNSUPPORTED
         or _MARKET_ORDER_UNSUPPORTED in str(exc)
+    )
+
+
+def _is_order_not_present(exc: BaseException) -> bool:
+    return (
+        getattr(exc, "error_code", None) == _ORDER_NOT_PRESENT
+        and "order not present" in str(getattr(exc, "error_msg", exc)).lower()
     )
 
 
@@ -97,7 +106,9 @@ class BearishPutLifecycle:
         existing = self.ledger.bearish_option_job(job_id)
         if existing is not None:
             if (existing.get("status") == "entry_submitting"
-                    and _is_market_order_unsupported(existing.get("last_error", ""))):
+                    and _is_market_order_unsupported(
+                        existing.get("submission_error") or existing.get("last_error", "")
+                    )):
                 existing["status"] = "entry_rejected"
                 existing["next_attempt_at"] = None
                 existing["rejection_code"] = _MARKET_ORDER_UNSUPPORTED
@@ -177,6 +188,7 @@ class BearishPutLifecycle:
             self.ledger.save_bearish_option_job(job_id, job)
         except Exception as exc:
             job["last_error"] = str(exc)[:500]
+            job["submission_error"] = job["last_error"]
             if _is_market_order_unsupported(exc):
                 job["status"] = "entry_rejected"
                 job["next_attempt_at"] = None
@@ -209,7 +221,25 @@ class BearishPutLifecycle:
         }
 
     def reconcile(self, job: dict[str, Any]) -> None:
-        if job.get("status") in {"entry_rejected", "entry_no_fill", "exits_active"}:
+        if job.get("status") in {
+            "entry_rejected", "entry_no_fill", "entry_unresolved", "exits_active",
+        }:
+            return
+        if (job.get("status") == "entry_submitting"
+                and _is_market_order_unsupported(
+                    job.get("submission_error") or job.get("last_error", "")
+                )):
+            job["status"] = "entry_rejected"
+            job["next_attempt_at"] = None
+            job["rejection_code"] = _MARKET_ORDER_UNSUPPORTED
+            self.ledger.save_bearish_option_job(job["job_id"], job)
+            logger.warning(
+                "Marked previously uncertain bearish PUT entry rejected for trade_id=%s symbol=%s contract=%s: %s",
+                job.get("trade_id"),
+                job.get("symbol"),
+                job.get("contract_symbol"),
+                job["last_error"],
+            )
             return
         if not self._is_due(job):
             return
@@ -226,9 +256,52 @@ class BearishPutLifecycle:
         return datetime.fromisoformat(value) <= datetime.now(UTC)
 
     def _defer(self, job: dict[str, Any], exc: BaseException) -> None:
+        if _is_market_order_unsupported(job.get("submission_error", "")):
+            job["status"] = "entry_rejected"
+            job["next_attempt_at"] = None
+            job["rejection_code"] = _MARKET_ORDER_UNSUPPORTED
+            job["last_reconcile_error"] = str(exc)[:500]
+            self.ledger.save_bearish_option_job(job["job_id"], job)
+            logger.warning(
+                "Stopped bearish PUT reconciliation after confirmed market-order rejection: trade_id=%s",
+                job.get("trade_id"),
+            )
+            return
+
+        if _is_order_not_present(exc):
+            retry_count = int(job.get("order_not_present_count", 0)) + 1
+            job["order_not_present_count"] = retry_count
+            job["last_reconcile_error"] = str(exc)[:500]
+            if retry_count >= _MAX_ORDER_NOT_PRESENT_RETRIES:
+                job["status"] = "entry_unresolved"
+                job["next_attempt_at"] = None
+                self.ledger.save_bearish_option_job(job["job_id"], job)
+                logger.error(
+                    "Stopping bearish PUT order lookups after %s 'order not present' responses; "
+                    "manual Webull reconciliation required: trade_id=%s client_order_id=%s",
+                    retry_count,
+                    job.get("trade_id"),
+                    job.get("entry_client_order_id"),
+                )
+                return
+            job["last_error"] = str(exc)[:500]
+            job["retry_count"] = retry_count
+            job["next_attempt_at"] = (
+                datetime.now(UTC) + timedelta(seconds=min(2 ** retry_count, 60))
+            ).isoformat()
+            self.ledger.save_bearish_option_job(job["job_id"], job)
+            logger.warning(
+                "Deferring bearish PUT reconciliation for trade_id=%s status=%s (%s/%s): %s",
+                job.get("trade_id"), job["status"], retry_count,
+                _MAX_ORDER_NOT_PRESENT_RETRIES, exc,
+            )
+            return
+
         retry_count = int(job.get("retry_count", 0)) + 1
         job["retry_count"] = retry_count
-        job["last_error"] = str(exc)[:500]
+        job["last_reconcile_error"] = str(exc)[:500]
+        if not job.get("last_error"):
+            job["last_error"] = str(exc)[:500]
         job["next_attempt_at"] = (
             datetime.now(UTC) + timedelta(seconds=min(2 ** min(retry_count, 6), 60))
         ).isoformat()
