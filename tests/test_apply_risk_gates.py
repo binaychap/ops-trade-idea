@@ -453,9 +453,10 @@ def test_submit_paper_order_calculates_stop_and_target_from_entry(monkeypatch):
     assert captured["target_price"] == 110.0
 
 
-def test_submit_paper_order_routes_bearish_decisions_to_put_executor(monkeypatch):
-    from app.main import Settings, TradingDecision
+def test_submit_paper_order_routes_bearish_decisions_to_market_put_lifecycle(monkeypatch, tmp_path):
+    from app.main import TradingDecision
     from app.execution import submitter as webull_submitter
+    from types import SimpleNamespace
 
     captured = {}
 
@@ -465,21 +466,21 @@ def test_submit_paper_order_routes_bearish_decisions_to_put_executor(monkeypatch
             assert kwargs == {"account_number": "test-margin"}
             return "acct-option-1"
 
-    class FakeExecutor:
-        @staticmethod
-        def option_type():
-            return "PUT"
+    class FakeLifecycle:
+        def __init__(self, ledger, *, option_module):
+            captured["module"] = option_module
 
-        @staticmethod
-        def strategy_label():
-            return "sell_next_way"
-
-        def __init__(self, module):
-            captured["module"] = module
-
-        def submit(self, **kwargs):
+        def submit_entry(self, **kwargs):
             captured["submit_kwargs"] = kwargs
-            return {"client_order_id": "put-ok"}
+            return {
+                "status": "entry_pending",
+                "entry_order_id": None,
+                "entry_client_order_id": "put-entry",
+                "contract_symbol": "AAPL-PUT",
+                "expiration": "2026-10-16",
+                "strike": 100.0,
+                "quantity": 1,
+            }
 
     decision = TradingDecision(
         action="sell_short",
@@ -490,20 +491,29 @@ def test_submit_paper_order_routes_bearish_decisions_to_put_executor(monkeypatch
         rationale="bearish",
         risk_notes=[],
     )
-    settings = Settings(DRY_RUN=False, OPTIONS_MARGIN_ACCOUNT_NUMBER="test-margin")
+    settings = SimpleNamespace(
+        dry_run=False,
+        webull_trading_mode="paper",
+        options_margin_account_number="test-margin",
+        live_options_daily_limit_usd=0,
+        database_path=str(tmp_path / "bearish.sqlite3"),
+    )
     payload = SimpleNamespace(entry_price=100.0, target_price=90.0, stop_price=105.0)
 
     monkeypatch.setattr(webull_submitter, "_load_webull_option_module", lambda: FakeBrokerModule())
-    monkeypatch.setattr("app.bearish.executor.BearishPutOptionExecutor", FakeExecutor)
+    monkeypatch.setattr("app.bearish.lifecycle.BearishPutLifecycle", FakeLifecycle)
+    monkeypatch.setattr("app.bearish.lifecycle.start_bearish_put_reconciler", lambda path: None)
 
     result = webull_submitter.submit_paper_order(decision, settings, "fingerprint-1234567890abcd", payload)
 
     assert result["broker"] == "webull"
     assert result["side"] == "SELL"
     assert captured["submit_kwargs"]["symbol"] == "AAPL"
-    assert "entry_limit" not in captured["submit_kwargs"]
+    assert captured["submit_kwargs"]["account_id"] == "acct-option-1"
+    assert captured["submit_kwargs"]["desired_strike"] == 100.0
     assert captured["submit_kwargs"]["profit_percent"] == 20
     assert captured["submit_kwargs"]["stop_loss_percent"] == 10
+    assert result["option"]["contract"] == "AAPL-PUT"
 
 
 def test_buy_stock_submits_combo_bracket_order(monkeypatch):

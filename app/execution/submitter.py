@@ -78,23 +78,37 @@ def submit_paper_order(decision: Any, settings: Any, fingerprint: str, payload: 
     if action == "sell_short":
         from app.broker.quotes import QuoteError
         profit_percent, stop_loss_percent = exit_percentages(settings, "bearish")
-        from app.bearish.executor import BearishPutOptionExecutor
+        from app.bearish.lifecycle import BearishPutLifecycle, start_bearish_put_reconciler
+        from app.persistence.ledger import Ledger
         option_module = _load_webull_option_module()
-        executor = BearishPutOptionExecutor(module=option_module)
-        expiry = None  # Resolve the earliest future listed PUT expiration from the chain.
+        if (getattr(settings, "webull_trading_mode", "paper") == "live"
+                and float(getattr(settings, "live_options_daily_limit_usd", 0) or 0) > 0):
+            return {
+                "skipped": True,
+                "reason": (
+                    "Live bearish market entries are disabled while a daily options budget is configured; "
+                    "a market order cannot reserve its premium before fill without a quote."
+                ),
+            }
         strike = round(float(reference_level) / 5.0) * 5.0
         try:
-            order_result = executor.submit(
-                account_id=options_margin_account_id(option_module, settings),
+            account_id = options_margin_account_id(option_module, settings)
+            lifecycle = BearishPutLifecycle(
+                Ledger(settings.database_path),
+                option_module=option_module,
+            )
+            job = lifecycle.submit_entry(
+                job_id=fingerprint,
+                trade_id=str(getattr(payload, "alert_name", None) or fingerprint),
+                account_id=account_id,
                 symbol=symbol,
-                strike=strike,
-                expiration=expiry,
+                desired_strike=strike,
                 quantity=1,
                 profit_percent=profit_percent,
                 stop_loss_percent=stop_loss_percent,
-                quote_max_age_seconds=getattr(settings, "bearish_quote_max_age_seconds", 60),
                 stop_loss_enabled=bearish_stop_loss_enabled(settings),
             )
+            start_bearish_put_reconciler(settings.database_path)
         except DailyBudgetExceeded as exc:
             return {"skipped": True, "reason": str(exc)}
         except QuoteError as exc:
@@ -109,14 +123,21 @@ def submit_paper_order(decision: Any, settings: Any, fingerprint: str, payload: 
             raise
         return {
             "dry_run": False,
-            "id": str(order_result.get("order_id") or order_result.get("client_order_id") or ""),
+            "id": str(job.get("entry_order_id") or job["entry_client_order_id"]),
             "client_order_id": client_order_id,
             "symbol": symbol,
-            "status": "submitted",
+            "status": job["status"],
             "side": "SELL",
             "notional_usd": d.get("notional_usd"),
             "broker": "webull",
-            "option": {"type": executor.option_type(), "strategy": executor.strategy_label()},
+            "option": {
+                "type": "PUT",
+                "strategy": "buy_put_market_then_bracket",
+                "contract": job["contract_symbol"],
+                "expiration": job["expiration"],
+                "strike": job["strike"],
+                "quantity": job["quantity"],
+            },
         }
 
     if payload is not None and getattr(payload, "direction", None) == "neutral":

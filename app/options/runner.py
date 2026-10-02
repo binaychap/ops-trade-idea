@@ -349,7 +349,7 @@ def fetch_webull_option_chain(
     )
     api_client = ApiClient(app_key, app_secret, "us")
     api_client.add_endpoint("us", endpoint)
-    api_client.set_stream_logger(stream=sys.stdout)
+    api_client.set_stream_logger(stream=sys.stdout, log_level=logging.INFO)
 
     try:
         response = DataClient(api_client).instrument.get_option_contracts(
@@ -692,6 +692,8 @@ def poll_optionomics_trade_ideas() -> list[dict[str, Any]]:
 @app.on_event("startup")
 def start_optionomics_polling() -> None:
     settings = get_settings()
+    from app.bearish.lifecycle import start_bearish_put_reconciler
+    start_bearish_put_reconciler(settings.database_path)
     should_poll = bool(os.getenv("OPTIONOMICS_API_KEY") and os.getenv("OPTIONOMICS_EMAIL")) and settings.optionomics_poll_enabled
     if not should_poll:
         reason = "disabled by OPTIONOMICS_POLL_ENABLED" if not settings.optionomics_poll_enabled else "missing OPTIONOMICS_API_KEY or OPTIONOMICS_EMAIL"
@@ -1009,7 +1011,7 @@ def get_webull_valid_expiry(
     )
     api_client = ApiClient(app_key, app_secret, "us")
     api_client.add_endpoint("us", endpoint)
-    api_client.set_stream_logger(stream=sys.stdout)
+    api_client.set_stream_logger(stream=sys.stdout, log_level=logging.INFO)
     data_client = module.DataClient(api_client)
 
     try:

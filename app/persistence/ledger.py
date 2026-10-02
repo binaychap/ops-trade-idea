@@ -51,6 +51,17 @@ class Ledger:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bearish_option_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    state_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
             conn.commit()
 
         with closing(sqlite3.connect(self.path, timeout=10)) as conn:
@@ -89,6 +100,22 @@ class Ledger:
         import fcntl
 
         with self.path.with_suffix(self.path.suffix + '.exits.lock').open('a') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                yield False
+                return
+            try:
+                yield True
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
+    @contextmanager
+    def bearish_option_worker_lock(self):
+        """Single-host exclusion for the fill-to-exit option reconciler."""
+        import fcntl
+
+        with self.path.with_suffix(self.path.suffix + '.bearish-options.lock').open('a') as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
@@ -237,6 +264,61 @@ class Ledger:
                     (status, decision_json, order_json, now, trade_id),
                 )
                 conn.commit()
+
+    def register_bearish_option_job(self, job_id: str, job: dict[str, Any]) -> bool:
+        now = utc_now_iso()
+        state = dict(job)
+        with self.write_lock():
+            with closing(sqlite3.connect(self.path, timeout=30)) as conn:
+                cursor = conn.execute(
+                    """
+                    INSERT OR IGNORE INTO bearish_option_jobs
+                        (job_id, status, state_json, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (job_id, state["status"], json.dumps(state, sort_keys=True), now, now),
+                )
+                conn.commit()
+        return cursor.rowcount == 1
+
+    def bearish_option_job(self, job_id: str) -> dict[str, Any] | None:
+        with closing(sqlite3.connect(self.path, timeout=10)) as conn:
+            row = conn.execute(
+                "SELECT state_json FROM bearish_option_jobs WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def bearish_option_jobs(self) -> list[dict[str, Any]]:
+        with closing(sqlite3.connect(self.path, timeout=10)) as conn:
+            rows = conn.execute(
+                """
+                SELECT state_json FROM bearish_option_jobs
+                 WHERE status IN (
+                    'entry_submitting', 'entry_pending', 'entry_cancel_pending',
+                    'exits_submitting'
+                 )
+                 ORDER BY created_at, job_id
+                """
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    def save_bearish_option_job(self, job_id: str, job: dict[str, Any]) -> None:
+        now = utc_now_iso()
+        state = dict(job)
+        with self.write_lock():
+            with closing(sqlite3.connect(self.path, timeout=30)) as conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE bearish_option_jobs
+                       SET status = ?, state_json = ?, updated_at = ?
+                     WHERE job_id = ?
+                    """,
+                    (state["status"], json.dumps(state, sort_keys=True), now, job_id),
+                )
+                conn.commit()
+        if cursor.rowcount != 1:
+            raise KeyError(f"Bearish option job not found: {job_id}")
 
     def reserve(self, fingerprint: str, payload: Any) -> bool:
         now = utc_now_iso()

@@ -5,7 +5,7 @@ Exit percentages are configurable with `BEARISH_PROFIT_PERCENT` and
 restart services after editing. Existing orders are unchanged.
 
 This documents the current `app/main.py` polling path, verified from source on
-2026-09-16. Direction comes from the Optionomics feed; the application does not
+2026-10-02. Direction comes from the Optionomics feed; the application does not
 calculate a bearish signal from market prices.
 
 ## Decision logic
@@ -61,68 +61,87 @@ flowchart TD
     L -->|Yes| M[Compute fingerprint and call submit_paper_order]
     M --> N{DRY_RUN enabled?}
     N -->|Yes| DRY[Return preview and record dry_run]
-    N -->|No| O[Route sell_short to BearishPutOptionExecutor]
-    O --> P[Resolve account and derive option parameters]
-    P --> Q[buy_put_with_bracket validates expiration and strike]
-    Q -->|Contract validation fails| SKIP
-    Q -->|Valid PUT| QUOTE[Fetch selected contract ask premium]
-    QUOTE -->|Missing, stale or invalid| SKIP
-    QUOTE -->|Fresh| R[Round entry and 20 percent profit / 10 percent stop to 0.05 tick]
-    R --> S[Submit PUT bracket to Webull]
-    S --> T[BUY LIMIT entry plus SELL profit and stop legs]
-    T --> U[Successful response: record ordered]
-    S -->|Submission error| FAIL[Polling handler records failed]
-    D -.->|Unhandled processing error| FAIL
+    N -->|No| O[Resolve account and desired PUT strike]
+    O --> P[Find earliest future listed PUT and nearest strike]
+    P -->|Contract validation fails| SKIP
+    P -->|Valid PUT| Q{Live options daily cap positive?}
+    Q -->|Yes| SKIP
+    Q -->|No| R[Persist unique entry job and client order ID]
+    R --> S[Submit BUY_TO_OPEN MARKET PUT]
+    S --> T[Record entry job; never replay ambiguous entry]
+    T --> U[Reconciler queries Webull order detail]
+    U -->|Pending| U
+    U -->|Partial| V[Cancel unfilled remainder and reconcile terminal fill]
+    U -->|Filled or terminal partial fill| W[Read filled quantity and average filled_price]
+    V --> W
+    U -->|No fill| X[Record entry_no_fill]
+    W --> Y[Calculate exit prices from actual average fill]
+    Y --> Z[Submit paired GTC broker-held exits]
+    Z --> AA[STOP_PROFIT SELL LIMIT at +20 percent]
+    Z --> AB[STOP_LOSS SELL STOP at configured loss percent]
+    AA --> AC[Record exits_active; app no longer watches option prices]
+    AB --> AC
+    S -.->|Ambiguous response| U
+    Z -.->|Ambiguous response| AD[Reconcile saved exit client IDs; never resubmit blindly]
+    AD --> AC
+    D -.->|Unhandled processing error| FAIL[Polling handler records failed]
     SKIP --> END
     DRY --> END
-    U --> END
+    AC --> END
+    X --> END
     FAIL --> END
 ```
 
 Unhandled exceptions elsewhere in per-idea processing also reach the polling
 handler and mark the idea failed. Feed-fetch `RuntimeError` ends that scan.
-The worker starts only when polling is enabled and feed credentials are present.
-When both trade ID and symbol are supplied, deduplication requires both to match
-an `ordered` row; it is not a permanent symbol-only exclusion.
+The fill reconciler starts at application startup even when new feed polling is
+disabled, so persisted entries can be completed after a restart. A database file
+lock prevents the main and dedicated option runners from reconciling the same job
+concurrently. When both trade ID and symbol are supplied, feed deduplication
+requires both to match an `ordered` row; it is not a permanent symbol-only
+exclusion.
 
 ## PUT bracket construction
 
 [app/execution/submitter.py](app/execution/submitter.py) routes `sell_short` to
-[BearishPutOptionExecutor](app/bearish/executor.py), which calls
-`buy_put_with_bracket` in
-[app/webull-buy-combo-option.py](app/webull-buy-combo-option.py).
+[BearishPutLifecycle](app/bearish/lifecycle.py). It persists the entry intent,
+submits a single-leg market PUT, and reconciles its fill before attaching exits.
 
-| Parameter | Current implementation |
-| --- | --- |
-| Reference level | First truthy payload entry, target, or stop; otherwise `max(notional_usd / 100, 1)` |
-| Expiration | Earliest listed PUT expiration after today (UTC); excludes expired and same-day contracts |
-| Requested strike | `round(reference_level / 5) * 5` |
-| Entry premium | Selected PUT contract snapshot ask, rounded to a 0.05 tick; no estimated-premium fallback |
-| Contract selection | Paginated PUT chain; earliest eligible listed expiration and closest available strike |
-| Quantity | One contract |
-| Entry | PUT `BUY`, `BUY_TO_OPEN`, LIMIT, DAY |
-| Take profit | PUT SELL LIMIT at entry premium plus 20% |
-| Stop loss | PUT SELL STOP_LOSS at entry premium minus 10% |
-| Price rounding | Entry and exit premiums rounded to a 0.05 tick |
-| Exit duration | DAY by default |
+| Parameter          | Current implementation                                                                                           |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| Reference level    | First truthy payload entry, target, or stop; otherwise `max(notional_usd / 100, 1)`                              |
+| Expiration         | Earliest listed PUT expiration after today (UTC); excludes expired and same-day contracts                        |
+| Requested strike   | `round(reference_level / 5) * 5`                                                                                 |
+| Entry premium      | Webull order detail `filled_price`; no snapshot request or estimated-premium fallback                            |
+| Contract selection | Paginated PUT chain; earliest eligible listed expiration and closest available strike                            |
+| Quantity           | One contract                                                                                                     |
+| Entry              | PUT `BUY`, `BUY_TO_OPEN`, MARKET, DAY                                                                            |
+| Take profit        | Broker-held `STOP_PROFIT` PUT SELL LIMIT at actual average fill plus 20%                                         |
+| Stop loss          | Broker-held `STOP_LOSS` PUT SELL stop at actual average fill minus configured percent; live toggle still applies |
+| Price rounding     | Exit prices use the average fill, then round to a 0.05 tick                                                      |
+| Exit duration      | GTC                                                                                                              |
 
-The feed target and stop validate the underlying bearish setup. The submitted
-exit prices are calculated separately from the option entry premium. Contract
-selection adjusts the expiration/strike before fetching the premium. The quote must
-match the selected contract, have a positive finite ask, and have `quote_time`
-within the last 60 seconds (at most five seconds in the future). Missing or
-invalid quotes prevent submission; the shared submitter logs the reason and the
-polling handler records skipped. Timestamp diagnostics include stale age/limit
-or future offset. The quote freshness limit remains 60 seconds.
+The feed target and stop validate the underlying bearish setup. Exit prices are
+calculated from the option fill, not those underlying levels. Current Webull
+options documentation supports MARKET option orders and order detail exposes
+`filled_quantity` and average `filled_price`. After a full fill, or after
+canceling an unfilled remainder of a partial fill, the reconciler submits only
+`STOP_PROFIT` and `STOP_LOSS` closing orders under one combo ID. Webull documents
+that closing an existing option position uses these sub-orders without a MASTER
+order. The profit exit is a broker-held LIMIT order, not a market sell; the app
+does not need snapshots or price polling after Webull accepts the exits.
 
-The entry remains a LIMIT order at the quoted ask, rounded to the existing 0.05
-tick. Exits use that rounded entry limit, not the actual fill price. For example,
-a 2.00 entry limit gives a 2.40 profit limit and a 1.80 stop. Tick rounding can
-change the exact percentages; collapsed or invalid brackets are rejected.
-Webull’s [US options API documentation](https://developer.webull.com/apis/docs/trade-api/options/)
-states that MARKET option orders are unsupported. Snapshot access and sandbox
-response fields still require live validation; these changes were tested with
-mocked data and broker clients. Dry runs still return before quote retrieval.
+The market entry is persisted before the request. Ambiguous submission or fill
+lookup is reconciled against the saved client order ID and never blindly replayed.
+Malformed or unavailable fill data remains pending for later reconciliation. An
+operator should inspect unresolved jobs and the Webull account rather than force
+reprocessing an idea.
+
+When `WEBULL_TRADING_MODE=live` and `WEBULL_LIVE_OPTIONS_DAILY_LIMIT_USD` is
+positive, bearish market entries are skipped. Their premium is unknown until the
+fill, so the configured cap cannot be safely reserved before entry. A value of
+zero disables this cap. Market entry has no premium ceiling; one contract can
+cost more than the decision's underlying notional.
 
 ## Implementation limits and naming discrepancies
 
@@ -135,15 +154,15 @@ mocked data and broker clients. Dry runs still return before quote retrieval.
   fixed at one contract rather than sized to the decision's notional budget.
 - The PUT contract lookup filters for `option_type: PUT` before selecting
   expiration and strike. Missing contract type or unavailable PUTs fail validation.
-- This bearish branch returns before the stock scheduling path. It does not
-  register a next-day stock exit job or reconcile option fills and exits.
-- `ordered` records successful submission handling, not a confirmed fill or a
-  completed bracket exit. This document is source verification, not a live broker
-  execution test.
+- `bearish_option_jobs` tracks entry reconciliation until broker exits are
+  accepted. Later position and exit-fill monitoring remain broker-side/manual.
+- `ordered` means the entry job was durably accepted by the application, not that
+  Webull confirmed a fill or completed an exit. Mocked broker tests cover the flow;
+  no live or sandbox order has validated runtime behavior.
 
 Related regression coverage lives in
-[tests/test_apply_risk_gates.py](tests/test_apply_risk_gates.py), including bearish
-level validation, PUT builder selection, and submission routing.
+[tests/test_apply_risk_gates.py](tests/test_apply_risk_gates.py) and
+[tests/test_bearish_lifecycle.py](tests/test_bearish_lifecycle.py).
 
 ## Account selection
 
@@ -167,16 +186,14 @@ main-option.py bearish submission delegates to that path too. The existing
 exact-or-next-listed resolver is shared through `app/options/expiration.py`.
 Empty chains skip execution; no synthetic expiration is used.
 
-## Delayed PUT quotes for paper testing
+## Quote setting scope
 
-`BEARISH_QUOTE_MAX_AGE_SECONDS` controls the bearish PUT ask timestamp age limit.
-The code and `.env.example` default to 60 seconds. Local `.env` is set to 1200
-seconds (20 minutes) to allow Webull's approximately 15-minute-delayed sandbox
-quotes. Entry and profit/stop prices therefore use the delayed premium, not a
-real-time price. Restart the service after editing the setting.
+`BEARISH_QUOTE_MAX_AGE_SECONDS` is used only by the legacy direct-call
+`buy_put_with_bracket` helper. The Optionomics bearish path no longer requests
+option snapshots, so this setting does not affect its market entry or exits.
 
-Values must be positive integer seconds. Quotes beyond the configured limit,
-invalid/nonfinite prices or timestamps, and quotes more than five seconds in
-the future remain rejected. This setting does not change stock or iron-condor
-quote limits. Both bearish entry points use the shared submitter. No orders
-were placed to enable this setting.
+## Legacy snapshot helper
+
+`buy_put_with_bracket` in `app/options/brackets.py` remains for direct callers and
+still uses `current_option_ask`; the Optionomics bearish path no longer calls it.
+`BEARISH_QUOTE_MAX_AGE_SECONDS` applies only to that legacy helper.

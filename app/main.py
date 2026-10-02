@@ -251,6 +251,8 @@ def poll_optionomics_trade_ideas() -> list[dict[str, Any]]:
 @app.on_event("startup")
 def start_optionomics_polling() -> None:
     settings = get_settings()
+    from app.bearish.lifecycle import start_bearish_put_reconciler
+    start_bearish_put_reconciler(settings.database_path)
     should_poll = bool(os.getenv("OPTIONOMICS_API_KEY") and os.getenv("OPTIONOMICS_EMAIL")) and settings.optionomics_poll_enabled
     if not should_poll:
         reason = "disabled by OPTIONOMICS_POLL_ENABLED" if not settings.optionomics_poll_enabled else "missing OPTIONOMICS_API_KEY or OPTIONOMICS_EMAIL"

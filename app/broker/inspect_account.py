@@ -3,6 +3,8 @@ import json
 
 from dotenv import load_dotenv
 from app.config.webull import resolve_webull_endpoint, resolve_webull_credentials
+import logging
+
 from webull.core.client import ApiClient
 from webull.trade.trade_client import TradeClient
 import sys
@@ -24,7 +26,7 @@ api_client.add_endpoint(
 )
 
 # Ensure the SDK doesn't create a local file logger in the cwd; use stream logger instead.
-api_client.set_stream_logger(stream=sys.stdout)
+api_client.set_stream_logger(stream=sys.stdout, log_level=logging.INFO)
 
 trade_client = TradeClient(api_client)
 
