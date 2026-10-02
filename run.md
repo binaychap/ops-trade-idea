@@ -119,7 +119,7 @@ Install dependencies:
 uv sync
 ```
 
-Run the main feed service, API and configured exit workers:
+Run the main feed service and API:
 
 ```bash
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
@@ -133,8 +133,8 @@ uv run python -m app.bullish.runner
 
 These are separate entry strategies, not equivalent launch commands. Main feed
 polling requires feed credentials and `OPTIONOMICS_POLL_ENABLED=true`. The
-dedicated runner polls the bullish feed. Live non-dry-run `--once` is rejected
-because managed exits require continuous execution.
+dedicated runner polls the bullish feed. Live `--once` runs one scan and exits;
+check order status and manage sells manually in Webull.
 
 ## Switch environments
 
@@ -146,7 +146,7 @@ Clients and settings are cached per process. Editing `.env` does not switch or
 stop a running worker. A mode/endpoint mismatch is rejected. Keep live and paper
 databases separate: saved orders, reservations and exit jobs are not namespaced
 by environment. Switching modes does not close positions or cancel existing
-orders; stopping live monitoring also stops its app-managed exits.
+orders. Live cash positions have no app-managed exits and must be closed manually.
 
 Keep infrastructure-only variables such as `TFE_API_TOKEN` outside the shared
 application `.env`; strict application settings reject unrecognized keys.
@@ -242,7 +242,7 @@ PY
 
 HTTP 200 confirms live account access; it does not test order permissions.
 A 401 / invalid credentials response means authentication failed; see below.
-Successful dashboard requests and an idle exit worker do not verify Webull access.
+Successful dashboard requests do not verify Webull access.
 
 ## Webull 401 / invalid credentials
 
@@ -254,11 +254,9 @@ settings select accounts after authentication and cannot fix invalid API keys.
 Check for stale exported variables overriding `.env`, then restart all workers.
 Do not post credentials in logs or support messages.
 
-The live cash exit worker checks the local ledger before initializing the SDK.
-Without pending cash exit jobs it makes no broker connection. With pending jobs,
-an initialization 401 leaves exits unmonitored and retries after 60 seconds with
-an actionable log message. Correcting the credentials is still required; this
-retry behavior does not resolve authentication or verify broker connectivity.
+No live-cash exit worker is started. The application does not poll live cash
+order status; inspect uncertain submissions and open orders manually in Webull.
+Other enabled application features may still make broker requests.
 
 Webull credentials are selected by `WEBULL_TRADING_MODE`: live requires
 `WEBULL_LIVE_APP_KEY` and `WEBULL_LIVE_APP_SECRET`; paper uses

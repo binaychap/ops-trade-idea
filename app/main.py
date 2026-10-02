@@ -520,7 +520,7 @@ def start_exit_scheduler() -> None:
     def runner():
         while not stop.is_set():
             try:
-                if ledger.exit_jobs():
+                if any(job.get('kind') != 'live_cash' for job in ledger.exit_jobs()):
                     scheduler = ExitScheduler(ledger, StockExecution(get_trade_client()), calendar)
                     scheduler.run_once()
             except Exception:
@@ -544,6 +544,9 @@ def stop_exit_scheduler() -> None:
 def start_morning_sell() -> None:
     settings = get_settings()
     if not settings.morning_sell_enabled or settings.dry_run:
+        return
+    if getattr(settings, 'webull_trading_mode', 'paper') == 'live':
+        logger.info('Morning sell is disabled in live mode; close stock positions manually in Webull')
         return
     from app.bullish.ledger import BullishLedger
     from app.exits.morning_sell import MorningSellCalendar, MorningSellScheduler
@@ -597,15 +600,21 @@ def stop_morning_sell() -> None:
         app.state.morning_sell_thread.join(timeout=5)
 
 
-@app.on_event("startup")
-def start_live_cash_exits() -> None:
-    from app.exits.live_cash import start_cash_exit_worker
-    app.state.live_cash_worker = start_cash_exit_worker(get_settings())
+    # Live cash orders are not monitored by a background worker.
 
 
-@app.on_event("shutdown")
-def stop_live_cash_exits() -> None:
-    worker = getattr(app.state, "live_cash_worker", None)
-    if worker:
-        worker[0].set()
-        worker[1].join(timeout=5)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
