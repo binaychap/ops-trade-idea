@@ -126,18 +126,21 @@ def test_option_quote_timestamp_diagnostics(offset, fragment):
     assert SYMBOL in str(error.value)
 
 
-def test_bearish_quote_error_returns_skip(monkeypatch):
+def test_bearish_market_entry_fails_closed_with_live_budget_cap(monkeypatch):
     from app.execution import submitter as webull_submitter
-    def stale(self, **kwargs):
-        raise QuoteError('Option quote is stale: age 61 seconds')
-    monkeypatch.setattr('app.bearish.executor.BearishPutOptionExecutor.submit', stale)
-    module = SimpleNamespace(get_account_id=lambda **kw: 'test')
+    called = []
+    module = SimpleNamespace(get_account_id=lambda **kw: called.append(kw))
     monkeypatch.setattr(webull_submitter, '_load_webull_option_module', lambda: module)
-    settings = SimpleNamespace(dry_run=False, options_margin_account_number='test-margin')
+    settings = SimpleNamespace(
+        dry_run=False, webull_trading_mode='live', live_options_daily_limit_usd=100,
+        options_margin_account_number='test-margin',
+    )
     result = webull_submitter.submit_paper_order(
         {'action': 'sell_short', 'symbol': 'AAPL', 'notional_usd': 250}, settings, 'test',
         SimpleNamespace(entry_price=100, target_price=90, stop_price=110, direction='bearish'))
-    assert result == {'skipped': True, 'reason': 'Option quote is stale: age 61 seconds'}
+    assert result['skipped'] is True
+    assert 'daily options budget' in result['reason']
+    assert called == []
 
 
 def test_chain_expiry_uses_listed_put_dates_without_five_day_filter(monkeypatch):

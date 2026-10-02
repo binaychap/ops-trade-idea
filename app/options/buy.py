@@ -1,6 +1,7 @@
 from app.common.paths import ENV_FILE
 import uuid
 import json
+import logging
 
 from dotenv import load_dotenv
 import sys
@@ -36,7 +37,7 @@ api_client.add_endpoint(
 )
 
 # Prevent SDK from creating file logs in the current working directory.
-api_client.set_stream_logger(stream=sys.stdout)
+api_client.set_stream_logger(stream=sys.stdout, log_level=logging.INFO)
 
 trade_client = TradeClient(api_client)
 

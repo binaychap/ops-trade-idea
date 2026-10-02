@@ -1,5 +1,27 @@
 ## Live-cash worker removed (2026-10-02)
 
+## Bearish PUT fill-based exits (2026-10-02)
+
+Optionomics bearish submissions now use `BearishPutLifecycle`: resolve the
+listed PUT, persist a unique market-entry intent before submission, then
+reconcile Webull order detail for filled quantity and average `filled_price`.
+After a full or terminal partial fill (unfilled remainder canceled), submit
+broker-held GTC `STOP_PROFIT` LIMIT (+configured profit, default 20%) and optional
+`STOP_LOSS` stop (-configured loss, default 10%) from the actual average fill.
+Option snapshots are no longer used in this path. Jobs and generated client IDs
+persist in `bearish_option_jobs`; ambiguous entry/exit calls are reconciled and
+never blindly replayed. Main and option-runner startup both start the worker;
+database file locking prevents duplicate local reconciliation. Live bearish
+The local `WEBULL_LIVE_BEARISH_STOP_LOSS_ENABLED` value was changed from false
+to true per the request to retain the stop; restart live workers to apply it.
+Live entries are skipped when the live options daily cap is positive because market
+premium cannot be reserved before fill. Official Webull docs currently list
+option MARKET orders and detail `filled_price`; live/sandbox order behavior is
+not verified. Mocked lifecycle and focused routing tests pass. No broker orders
+were placed.
+
+## Live-cash worker removed (2026-10-02)
+
 The live-cash status/exit worker and its FastAPI/bullish-runner startup hooks are
 removed. Live stock buys still submit market cash orders and persist intent and
 permanent fingerprints, but the app no longer polls buy/sell status, cancels

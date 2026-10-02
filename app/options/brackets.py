@@ -67,7 +67,7 @@ def _find_valid_contract(symbol: str, desired_expiration: str | None, desired_st
 
     api_client = ApiClient(app_key, app_secret, "us")
     api_client.add_endpoint("us", endpoint)
-    api_client.set_stream_logger(stream=sys.stdout)
+    api_client.set_stream_logger(stream=sys.stdout, log_level=logging.INFO)
 
     data_client = DataClient(api_client)
 

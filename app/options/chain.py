@@ -32,7 +32,7 @@ api_client.add_endpoint(
 )
 
 # Prevent SDK from creating file log in project root; prefer stream logging.
-api_client.set_stream_logger(stream=sys.stdout)
+api_client.set_stream_logger(stream=sys.stdout, log_level=logging.INFO)
 
 data_client = DataClient(api_client)
 

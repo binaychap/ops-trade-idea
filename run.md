@@ -61,6 +61,12 @@ false. Disabling bearish stops does not disable bearish entries: those remain
 gated separately by `ALLOW_SHORT_SELLING=true`. That existing setting is required
 for bearish PUT entry decisions even though the broker buys a PUT.
 
+Live bearish PUT entries use a market order, so the premium is unknown until
+Webull reports the fill. To avoid bypassing a configured dollar cap, the bearish
+entry path skips while `WEBULL_LIVE_OPTIONS_DAILY_LIMIT_USD` is positive; set it
+to `0` to disable that cap before enabling this market-entry flow. The app then
+uses the actual fill price to submit broker-held GTC profit and stop exits.
+
 This selects production only. Fill in the live account fields used by your
 enabled strategies; live mode never falls back to paper accounts. Automated
 bullish stock entries request a $100 total cash budget, split into eligible
@@ -189,7 +195,7 @@ Restart processes after changing limits.
 ## Live bearish stop-loss toggle
 
 ```ini
-WEBULL_LIVE_BEARISH_STOP_LOSS_ENABLED=false
+WEBULL_LIVE_BEARISH_STOP_LOSS_ENABLED=true
 ```
 
 This omits the stop-loss leg from new live bearish PUT entries while retaining

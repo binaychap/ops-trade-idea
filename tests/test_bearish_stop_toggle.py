@@ -34,14 +34,26 @@ def test_actual_put_orders_keep_profit_and_conditionally_include_stop(monkeypatc
     assert orders[0]['quantity'] == '1'
 
 
-def test_main_passes_live_toggle_to_executor(monkeypatch):
+def test_main_passes_live_stop_toggle_to_lifecycle(monkeypatch, tmp_path):
     from app.execution import submitter
-    settings = Settings(_env_file=None, WEBULL_TRADING_MODE='live', WEBULL_ENDPOINT='',
-        DRY_RUN=False, WEBULL_LIVE_OPTIONS_MARGIN_ACCOUNT_NUMBER='test',
-        WEBULL_LIVE_BEARISH_STOP_LOSS_ENABLED=False)
+    settings = SimpleNamespace(
+        dry_run=False,
+        webull_trading_mode='live',
+        options_margin_account_number='test',
+        live_options_daily_limit_usd=0,
+        live_bearish_stop_loss_enabled=False,
+        database_path=str(tmp_path / 'bearish.sqlite3'),
+    )
     monkeypatch.setattr(submitter, '_load_webull_option_module', lambda: SimpleNamespace(get_account_id=lambda **kw: 'test'))
-    submit = Mock(return_value={})
-    monkeypatch.setattr(BearishPutOptionExecutor, 'submit', submit)
+    submit = Mock(return_value={
+        'status': 'entry_pending', 'entry_client_order_id': 'entry',
+        'entry_order_id': None, 'contract_symbol': 'TEST-PUT',
+        'expiration': '2026-12-18', 'strike': 100, 'quantity': 1,
+    })
+    lifecycle = Mock()
+    lifecycle.submit_entry = submit
+    monkeypatch.setattr('app.bearish.lifecycle.BearishPutLifecycle', lambda *a, **kw: lifecycle)
+    monkeypatch.setattr('app.bearish.lifecycle.start_bearish_put_reconciler', lambda path: None)
     submitter.submit_paper_order({'action': 'sell_short', 'symbol': 'TEST'}, settings, 'test',
         SimpleNamespace(direction='bearish', entry_price=100))
     assert submit.call_args.kwargs['stop_loss_enabled'] is False
