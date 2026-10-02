@@ -1,5 +1,12 @@
 ## Live cash response and rate-limit repair (2026-09-30)
 
+Live bullish cash entries remain market cash-amount orders, but no longer get
+app-managed profit, stop-loss, next-day, or morning sell triggers. Cash jobs are
+retained for pending entry and already-submitted sell reconciliation only; old
+jobs without an explicit manage_exits field default to no new automated sells.
+Existing submitted sells continue reconciliation. Positions require manual
+monitoring/closing. Live one-shot bullish runs remain blocked for reconciliation.
+
 Cash order parsing no longer requires total_cash_amount to be echoed by order
 detail; when present it must still match persisted intent. Client ID, symbol,
 side, instrument/order type, status, actual fill quantity and positive fill price
@@ -12,6 +19,10 @@ stops that pass and resets retry count after successful reconciliation. Multiple
 hosts/direct SDK callers remain outside this limiter. No entry replay or runtime
 ledger changes. run.md documents deployment and limitations. Tests cover absent
 and mismatched cash echoes, missing fills, shared pacing and repeated 429 cooldown.
+Production log wording `Scheduled stock exit ... deferred` identified an older
+deployed checkout; current code emits one queue-wide deferral warning and
+recognizes the SDK's `HTTP Status: 429, Code: TOO_MANY_REQUESTS` response. Restart
+all active worker services after deploying the current revision.
 Validation: 300 tests passed with local dotenv isolated; focused lint and diff
 checks passed. No production responses fetched, broker orders placed or services
 restarted.

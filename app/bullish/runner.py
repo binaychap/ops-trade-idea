@@ -242,7 +242,7 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
     runner = MainTopBullish()
     if args.once and runner.settings.webull_trading_mode == 'live' and not runner.settings.dry_run:
-        parser.error('Live cash trading requires continuous execution for managed exits; omit --once')
+        parser.error('Live cash trading requires continuous execution for order reconciliation; omit --once')
     if args.once:
         print(json.dumps(runner.run(limit=args.limit), indent=2), flush=True)
     else:

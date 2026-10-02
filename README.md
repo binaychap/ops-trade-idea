@@ -770,30 +770,25 @@ debit including fees. See [Webull stock order rules](https://developer.webull.co
 Each cash leg is persisted before its own broker request. If the market closes,
 a request fails or the process stops mid-plan, unsent legs are abandoned rather
 than replayed. This can leave less than $100 invested; attempted legs still need
-reconciliation. All confirmed entry fills contribute to a weighted average entry
-price for exits. Sell orders close whole shares first, then the fractional
-remainder, reconciling each before sending the next. Production order-detail
-requests from cash workers are paced to respect the documented query limit;
-large plans can make a reconciliation cycle longer than the 10-second interval.
+reconciliation. Newly submitted live cash buys do not create app-managed
+profit, stop-loss, next-day, or morning sell triggers. Positions remain open
+until you submit a separate sell order; there is no app-managed exit protection.
 
-Fractional entries have **app-managed exits, not broker-held brackets**. A worker
-runs every 10 seconds during an XNYS regular session, tracks confirmed fills and
-uses the actual average fill price for the configured bullish profit/stop
-percentages. Triggers submit a market sell of the remaining confirmed shares;
-execution price is not guaranteed. Fresh quote failures defer price exits.
-Configured next-day deadlines and morning-sell requests also use this worker.
-Partially filled entries are cancelled before liquidating their confirmed fills.
+The cash worker runs every 10 seconds to reconcile pending buy orders and any
+sell orders already submitted before this behavior change. It does not poll
+quotes or submit replacement/automatic sells. Order-detail requests are paced
+to respect the documented query limit; unresolved orders may still be delayed
+by broker rate limits. Existing paper bracket/exit behavior remains unchanged.
 
 Keep either the FastAPI service or continuous bullish runner running with the
-same live database. Live non-dry-run `--once` is rejected because it would stop
-exit monitoring. Application outages, closed sessions or broker/quote failures
-can delay exits. Existing paper bracket/exit behavior remains unchanged.
+same live database to reconcile uncertain or partial live cash orders. Live
+non-dry-run `--once` is rejected because it would stop that reconciliation.
 
 Entries require a flat position and no active exit job for that account/symbol.
 Order intent and client IDs are persisted before submission. An ambiguous entry
 or sell response is reconciled by its saved ID; it is never blindly retried.
-Missing orders require reconciliation, not deletion of reservations. Confirmed
-terminal partial sells can submit only the unfilled remainder. Cash jobs are
+Missing orders require reconciliation, not deletion of reservations. Previously
+submitted terminal partial sells are not replaced with additional sells. Cash jobs are
 stored in `scheduled_stock_exits` with `kind=live_cash`; the regular bracket
 scheduler leaves them to the cash worker. All workers share the database exit
 lock. `DRY_RUN=true` previews the cash request without broker calls, reservations,

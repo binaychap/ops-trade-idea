@@ -66,9 +66,11 @@ enabled strategies; live mode never falls back to paper accounts. Automated
 bullish stock entries request a $100 total cash budget, split into eligible
 fractional orders as needed. Options still use whole contracts.
 
-Live bullish profit/stop exits are managed by the application. Keep the service
-or continuous bullish runner running to monitor these positions. See
-[README.md](README.md#live-bullish-stock-cash-orders) for execution limits.
+Live bullish stock buys are market cash orders with no application-managed
+profit, stop-loss, or next-day exit. The worker reconciles pending buy orders and
+any sell orders that were already submitted. Monitor and close positions
+yourself. See [README.md](README.md#live-bullish-stock-cash-orders) for execution
+limits.
 
 ## Paper trading — sandbox orders
 

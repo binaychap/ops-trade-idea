@@ -76,16 +76,18 @@ class CashExitScheduler(ExitScheduler):
         if entry.filled == 0:
             job['status'] = 'complete'
             return
-        if entry.filled_price is None or entry.filled_price <= 0:
-            raise ValueError('Cash entry average fill price missing')
-        job['entry_price'] = str(entry.filled_price)
-        job['target_price'] = str(entry.filled_price * (1 + Decimal(str(job['profit_percent'])) / 100))
-        job['stop_price'] = str(entry.filled_price * (1 - Decimal(str(job['stop_loss_percent'])) / 100))
-        if job['next_day_exit'] and not job.get('due_at'):
-            if entry.filled_at is None:
-                raise ValueError('Entry fill timestamp missing')
-            calendar = ExitCalendar(job['exit_time'], 'America/New_York')
-            job['due_at'] = calendar.next_exit(entry.filled_at).isoformat()
+        manage_exits = job.get('manage_exits', False)
+        if manage_exits:
+            if entry.filled_price is None or entry.filled_price <= 0:
+                raise ValueError('Cash entry average fill price missing')
+            job['entry_price'] = str(entry.filled_price)
+            job['target_price'] = str(entry.filled_price * (1 + Decimal(str(job['profit_percent'])) / 100))
+            job['stop_price'] = str(entry.filled_price * (1 - Decimal(str(job['stop_loss_percent'])) / 100))
+            if job['next_day_exit'] and not job.get('due_at'):
+                if entry.filled_at is None:
+                    raise ValueError('Entry fill timestamp missing')
+                calendar = ExitCalendar(job['exit_time'], 'America/New_York')
+                job['due_at'] = calendar.next_exit(entry.filled_at).isoformat()
         remaining = entry.filled
         active = False
         for attempt in job['market_orders']:
@@ -103,6 +105,10 @@ class CashExitScheduler(ExitScheduler):
             return
         if remaining == 0:
             job['status'] = 'complete'
+            return
+        if not manage_exits:
+            job['status'] = 'complete'
+            job['remaining_quantity'] = str(remaining)
             return
         job['status'] = 'scheduled'
         if not self.calendar.is_open(now):

@@ -401,6 +401,14 @@ complete cross-strategy duplicate/position guard.
   intended revision, run `uv sync --locked`, validate, and restart.
 - Restart services after changing `.env`; do not start a second manual runner.
 
+Live cash-exit HTTP 429 responses are recognized by status or the
+`TOO_MANY_REQUESTS` code. The worker persists a queue-wide cooldown and stops
+that reconciliation pass. If logs instead show each `Scheduled stock exit ...
+deferred` independently, the service is running an older checkout; update the
+repo and restart every service that runs the cash-exit worker (API and bullish
+runner, if enabled). After restart, expect one `Webull rate limited exits;
+queue deferred` warning per 429 event rather than a per-job deferral.
+
 Useful commands:
 
 ```bash

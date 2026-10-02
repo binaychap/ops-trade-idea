@@ -47,6 +47,9 @@ def test_live_cash_request_has_amount_and_no_quantity_or_brackets(tmp_path):
     assert 'quantity' not in orders[0] and 'limit_price' not in orders[0]
     job = Ledger(settings(tmp_path).database_path).exit_jobs()[0]
     assert job['kind'] == 'live_cash' and job['entry_id'] == result['client_order_id']
+    assert job['manage_exits'] is False
+    assert 'profit_percent' not in job and 'stop_loss_percent' not in job
+    assert result['exit_management'] == 'none'
 
 
 def test_timeout_never_replays_cash_buy(tmp_path):
@@ -87,6 +90,9 @@ def setup_exit(tmp_path, price=220):
     submit(tmp_path, trade_client=client())
     ledger = Ledger(settings(tmp_path).database_path)
     job = ledger.exit_jobs()[0]
+    job.update(manage_exits=True, profit_percent=10, stop_loss_percent=5,
+               next_day_exit=False, exit_time='09:35')
+    ledger.save_exit_job(job)
     entry = StockOrder(job['entry_id'], 'FILLED', Decimal('.5'), Decimal('.5'), NOW, Decimal(200))
     broker = SimpleNamespace(order=Mock(return_value=entry),
         position=Mock(return_value=Decimal('.5')), market_sell=Mock(), cancel=Mock())
@@ -106,6 +112,30 @@ def test_cash_exits_use_actual_fills_and_configured_thresholds(tmp_path, price, 
         assert len(saved['market_orders']) == 1
     else:
         broker.market_sell.assert_not_called()
+
+
+def test_live_cash_entry_reconciles_without_automatic_exit(tmp_path):
+    ledger, job, broker, scheduler, entry = setup_exit(tmp_path, price=220)
+    job.pop('manage_exits')
+    ledger.save_exit_job(job)
+    scheduler.quote_provider = Mock(side_effect=AssertionError('exit quote must not be read'))
+    scheduler.run_once(NOW)
+    broker.market_sell.assert_not_called()
+    assert ledger.exit_jobs() == []
+
+
+def test_disabled_exit_job_reconciles_existing_sell_without_replacing_it(tmp_path):
+    ledger, job, broker, scheduler, entry = setup_exit(tmp_path)
+    sell = StockOrder('existing-sell', 'CANCELLED', Decimal('.2'), Decimal('.5'), NOW)
+    job.pop('manage_exits')
+    job['market_orders'] = [{'id': 'existing-sell', 'quantity': '.5', 'status': 'submitting'}]
+    ledger.save_exit_job(job)
+    broker.order.side_effect = lambda a, oid, s, side, **kw: entry if side == 'BUY' else sell
+
+    scheduler.run_once(NOW)
+
+    broker.market_sell.assert_not_called()
+    assert ledger.exit_jobs() == []
 
 
 def test_lost_exit_response_is_not_replayed_after_restart(tmp_path):
@@ -349,7 +379,9 @@ def test_cash_rate_limit_persists_queue_cooldown(tmp_path):
     ledger, job, broker, scheduler, entry = setup_exit(tmp_path)
     other = dict(job, id='another', symbol='MSFT')
     ledger.register_exit_job(other)
-    broker.order.side_effect = RuntimeError('Webull request failed: HTTP 429')
+    broker.order.side_effect = RuntimeError(
+        'HTTP Status: 429, Code: TOO_MANY_REQUESTS, Msg: Too many requests, RequestID: test'
+    )
     scheduler.run_once(NOW)
     assert broker.order.call_count == 1
     assert all(j['next_check_at'] == (NOW + timedelta(seconds=60)).isoformat() for j in ledger.exit_jobs())
