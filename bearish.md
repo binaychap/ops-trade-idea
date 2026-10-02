@@ -116,6 +116,7 @@ submits a single-leg market PUT, and reconciles its fill before attaching exits.
 | Contract selection | Paginated PUT chain; earliest eligible listed expiration and closest available strike                            |
 | Quantity           | One contract                                                                                                     |
 | Entry              | PUT `BUY`, `BUY_TO_OPEN`, MARKET, DAY                                                                            |
+| Entry              | PUT `BUY`, `BUY_TO_OPEN`, MARKET, DAY; Webull may reject market orders for limited-liquidity contracts           |
 | Take profit        | Broker-held `STOP_PROFIT` PUT SELL LIMIT at actual average fill plus 20%                                         |
 | Stop loss          | Broker-held `STOP_LOSS` PUT SELL stop at actual average fill minus configured percent; live toggle still applies |
 | Price rounding     | Exit prices use the average fill, then round to a 0.05 tick                                                      |
@@ -132,10 +133,16 @@ order. The profit exit is a broker-held LIMIT order, not a market sell; the app
 does not need snapshots or price polling after Webull accepts the exits.
 
 The market entry is persisted before the request. Ambiguous submission or fill
+The market entry is persisted before the request. Ambiguous submission or fill
 lookup is reconciled against the saved client order ID and never blindly replayed.
-Malformed or unavailable fill data remains pending for later reconciliation. An
-operator should inspect unresolved jobs and the Webull account rather than force
-reprocessing an idea.
+Webull's `OPENAPI_OPTION_NOT_ALLOW_PLACING_MARKET_ORDER` response is definitive:
+the job becomes `entry_rejected`, is removed from reconciliation, and the idea is
+logged/skipped. Existing stuck jobs carrying that error are repaired on the next
+poll. There is no automatic limit fallback because a limit requires a valid option
+premium; the old snapshot endpoint was denied for this account. Enable option
+market-data access or provide an explicit, operator-approved limit price before
+adding a limit-entry fallback. Malformed or unavailable fill data remains pending
+for later reconciliation.
 
 When `WEBULL_TRADING_MODE=live` and `WEBULL_LIVE_OPTIONS_DAILY_LIMIT_USD` is
 positive, bearish market entries are skipped. Their premium is unknown until the

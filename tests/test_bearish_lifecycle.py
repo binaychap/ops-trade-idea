@@ -1,6 +1,7 @@
 from app.persistence.ledger import Ledger
 from app.bearish.lifecycle import BearishPutLifecycle
 from types import SimpleNamespace
+from webull.core.exception.exceptions import ServerException
 
 
 def test_bearish_option_jobs_are_unique_and_resumable(tmp_path):
@@ -128,6 +129,127 @@ def test_ambiguous_market_entry_is_never_replayed(tmp_path):
     assert first["status"] == "entry_submitting"
     assert second["entry_client_order_id"] == first["entry_client_order_id"]
     assert len(calls) == 1
+
+
+def test_unsupported_market_order_is_terminal_and_not_replayed(tmp_path, caplog):
+    ledger = Ledger(str(tmp_path / "trades.sqlite3"))
+    calls = []
+
+    class FakeOrderApi:
+        def place_order(self, account_id, orders, **kwargs):
+            calls.append(("place", orders))
+            raise ServerException(
+                "OPENAPI_OPTION_NOT_ALLOW_PLACING_MARKET_ORDER",
+                "This contract has limited liquidity and does not support market orders.",
+                http_status=417,
+            )
+
+        def get_order_detail(self, account_id, order_id):
+            calls.append(("detail", order_id))
+            raise AssertionError("Rejected order must not be reconciled")
+
+    client = SimpleNamespace(order_v3=FakeOrderApi())
+    module = SimpleNamespace(_find_valid_contract=lambda *args, **kwargs: (
+        "2026-10-16", 10.0, "CTVA261016P00010000",
+    ))
+    lifecycle = BearishPutLifecycle(ledger, trade_client=client, option_module=module)
+    args = dict(
+        job_id="job-market-rejected",
+        trade_id="trade-rejected",
+        account_id="account-1",
+        symbol="CTVA",
+        desired_strike=10,
+        quantity=1,
+        profit_percent=20,
+        stop_loss_percent=10,
+        stop_loss_enabled=True,
+    )
+
+    first = lifecycle.submit_entry(**args)
+    second = lifecycle.submit_entry(**args)
+    lifecycle.reconcile(first)
+
+    assert first["status"] == second["status"] == "entry_rejected"
+    assert first["next_attempt_at"] is None
+    assert first["rejection_code"] == "OPENAPI_OPTION_NOT_ALLOW_PLACING_MARKET_ORDER"
+    assert "does not support market orders" in first["last_error"]
+    assert calls[0][0] == "place"
+    assert len(calls) == 1
+    assert ledger.bearish_option_jobs() == []
+    assert "Webull rejected bearish PUT market entry" in caplog.text
+
+
+def test_stuck_market_rejection_is_repaired_from_saved_error(tmp_path):
+    ledger = Ledger(str(tmp_path / "trades.sqlite3"))
+    job = {
+        "job_id": "old-job",
+        "status": "entry_submitting",
+        "trade_id": "old-trade",
+        "symbol": "CTVA",
+        "contract_symbol": "CTVA261016P00010000",
+        "expiration": "2026-10-16",
+        "last_error": (
+            "HTTP Status: 417, Code: "
+            "OPENAPI_OPTION_NOT_ALLOW_PLACING_MARKET_ORDER"
+        ),
+        "next_attempt_at": None,
+    }
+    assert ledger.register_bearish_option_job("old-job", job)
+    lifecycle = BearishPutLifecycle(ledger, trade_client=object(), option_module=object())
+
+    repaired = lifecycle.submit_entry(
+        job_id="old-job",
+        trade_id="old-trade",
+        account_id="account-1",
+        symbol="CTVA",
+        desired_strike=10,
+        quantity=1,
+        profit_percent=20,
+        stop_loss_percent=10,
+        stop_loss_enabled=True,
+    )
+
+    assert repaired["status"] == "entry_rejected"
+    assert repaired["rejection_code"] == "OPENAPI_OPTION_NOT_ALLOW_PLACING_MARKET_ORDER"
+    assert ledger.bearish_option_jobs() == []
+
+
+def test_submitter_returns_market_order_rejection_as_skipped(monkeypatch, tmp_path):
+    from app.execution import submitter
+
+    class FakeLifecycle:
+        def __init__(self, ledger, *, option_module):
+            pass
+
+        def submit_entry(self, **kwargs):
+            return {
+                "status": "entry_rejected",
+                "last_error": "HTTP Status: 417, Code: OPENAPI_OPTION_NOT_ALLOW_PLACING_MARKET_ORDER",
+            }
+
+    monkeypatch.setattr(
+        submitter,
+        "_load_webull_option_module",
+        lambda: SimpleNamespace(get_account_id=lambda **kwargs: "account-1"),
+    )
+    monkeypatch.setattr("app.bearish.lifecycle.BearishPutLifecycle", FakeLifecycle)
+    monkeypatch.setattr("app.bearish.lifecycle.start_bearish_put_reconciler", lambda path: None)
+    settings = SimpleNamespace(
+        dry_run=False,
+        webull_trading_mode="paper",
+        options_margin_account_number="test-margin",
+        database_path=str(tmp_path / "trades.sqlite3"),
+    )
+
+    result = submitter.submit_paper_order(
+        {"action": "sell_short", "symbol": "CTVA", "notional_usd": 250},
+        settings,
+        "fingerprint",
+        SimpleNamespace(direction="bearish", entry_price=12.32),
+    )
+
+    assert result["skipped"] is True
+    assert "OPENAPI_OPTION_NOT_ALLOW_PLACING_MARKET_ORDER" in result["reason"]
 
 
 def test_filled_status_with_zero_quantity_is_deferred_not_marked_no_fill(tmp_path):

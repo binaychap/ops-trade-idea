@@ -94,6 +94,17 @@ def test_unsupported_cash_amount_does_not_submit(tmp_path, price):
     resolver.assert_not_called()
 
 
+def test_live_stock_skip_reason_is_logged(caplog, tmp_path):
+    caplog.set_level('INFO', logger='app.execution.live_stock')
+    result = submit_live_stock(
+        'AAPL', settings(tmp_path), 'test',
+        account_resolver=Mock(), market_open=lambda: False,
+    )
+
+    assert result == {'skipped': True, 'reason': 'outside_market_hours'}
+    assert 'Skipping live stock buy for AAPL: outside_market_hours' in caplog.text
+
+
 def test_lower_cap_blocks_instead_of_silently_spending_more(tmp_path):
     config = settings(tmp_path)
     config.max_notional_usd = 50

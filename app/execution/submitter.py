@@ -109,6 +109,11 @@ def submit_paper_order(decision: Any, settings: Any, fingerprint: str, payload: 
                 stop_loss_enabled=bearish_stop_loss_enabled(settings),
             )
             start_bearish_put_reconciler(settings.database_path)
+            if job.get("status") == "entry_rejected":
+                return {
+                    "skipped": True,
+                    "reason": job.get("last_error") or "Webull rejected the PUT entry order",
+                }
         except DailyBudgetExceeded as exc:
             return {"skipped": True, "reason": str(exc)}
         except QuoteError as exc:

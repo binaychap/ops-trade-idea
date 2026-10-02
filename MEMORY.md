@@ -15,10 +15,15 @@ database file locking prevents duplicate local reconciliation. Live bearish
 The local `WEBULL_LIVE_BEARISH_STOP_LOSS_ENABLED` value was changed from false
 to true per the request to retain the stop; restart live workers to apply it.
 Live entries are skipped when the live options daily cap is positive because market
-premium cannot be reserved before fill. Official Webull docs currently list
-option MARKET orders and detail `filled_price`; live/sandbox order behavior is
-not verified. Mocked lifecycle and focused routing tests pass. No broker orders
-were placed.
+premium cannot be reserved before fill. Webull may definitively reject MARKET
+for limited-liquidity options with
+`OPENAPI_OPTION_NOT_ALLOW_PLACING_MARKET_ORDER` (HTTP 417); that response now
+sets `entry_rejected`, prevents repeated order-detail lookups, and returns a
+logged skip. Persisted jobs with this error are repaired on next poll. No
+automatic LIMIT fallback is safe until option quote entitlement or an explicit
+approved limit is available. Official Webull docs list option MARKET orders and
+order detail `filled_price`, but contract-level support varies. Mocked rejection
+and recovery tests cover this behavior; no broker orders were placed.
 
 ## Live-cash worker removed (2026-10-02)
 

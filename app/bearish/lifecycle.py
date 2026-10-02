@@ -19,10 +19,18 @@ _detail_lock = threading.Lock()
 _next_detail_at = 0.0
 _KNOWN_STATUSES = {"PENDING", "SUBMITTED", "PARTIAL_FILLED", "FILLED", "CANCELLED", "FAILED"}
 _TERMINAL_STATUSES = {"FILLED", "CANCELLED", "FAILED"}
+_MARKET_ORDER_UNSUPPORTED = "OPENAPI_OPTION_NOT_ALLOW_PLACING_MARKET_ORDER"
 
 
 def _new_order_id() -> str:
     return uuid4().hex
+
+
+def _is_market_order_unsupported(exc: BaseException | str) -> bool:
+    return (
+        getattr(exc, "error_code", None) == _MARKET_ORDER_UNSUPPORTED
+        or _MARKET_ORDER_UNSUPPORTED in str(exc)
+    )
 
 
 def _response_data(response: Any) -> Any:
@@ -88,6 +96,19 @@ class BearishPutLifecycle:
 
         existing = self.ledger.bearish_option_job(job_id)
         if existing is not None:
+            if (existing.get("status") == "entry_submitting"
+                    and _is_market_order_unsupported(existing.get("last_error", ""))):
+                existing["status"] = "entry_rejected"
+                existing["next_attempt_at"] = None
+                existing["rejection_code"] = _MARKET_ORDER_UNSUPPORTED
+                self.ledger.save_bearish_option_job(job_id, existing)
+                logger.warning(
+                    "Marked previously uncertain bearish PUT entry rejected for %s (%s %s): %s",
+                    symbol,
+                    existing.get("contract_symbol"),
+                    existing.get("expiration"),
+                    existing["last_error"],
+                )
             return existing
 
         expiration, strike, contract_symbol = self._module()._find_valid_contract(
@@ -156,6 +177,19 @@ class BearishPutLifecycle:
             self.ledger.save_bearish_option_job(job_id, job)
         except Exception as exc:
             job["last_error"] = str(exc)[:500]
+            if _is_market_order_unsupported(exc):
+                job["status"] = "entry_rejected"
+                job["next_attempt_at"] = None
+                job["rejection_code"] = _MARKET_ORDER_UNSUPPORTED
+                self.ledger.save_bearish_option_job(job_id, job)
+                logger.warning(
+                    "Webull rejected bearish PUT market entry for %s (%s %s): %s",
+                    symbol,
+                    contract_symbol,
+                    expiration,
+                    job["last_error"],
+                )
+                return job
             job["next_attempt_at"] = (datetime.now(UTC) + timedelta(seconds=2)).isoformat()
             self.ledger.save_bearish_option_job(job_id, job)
             logger.exception("Bearish PUT entry result is uncertain for trade_id=%s", trade_id)
@@ -175,6 +209,8 @@ class BearishPutLifecycle:
         }
 
     def reconcile(self, job: dict[str, Any]) -> None:
+        if job.get("status") in {"entry_rejected", "entry_no_fill", "exits_active"}:
+            return
         if not self._is_due(job):
             return
         if job["status"] == "exits_submitting":

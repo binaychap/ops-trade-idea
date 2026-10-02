@@ -313,6 +313,11 @@ def maybe_submit_order(
     order_payload = submit_paper_order(decision, settings, fingerprint, payload)
     # If the submitter returned an explicit skip marker, mark skipped and return None.
     if isinstance(order_payload, dict) and order_payload.get("skipped"):
+        logger.info(
+            "Skipping Webull submission for %s: %s",
+            decision.symbol,
+            order_payload.get("reason", "submission skipped"),
+        )
         if trade_id is not None:
             ledger.mark_trade_idea_status(trade_id, status="skipped", decision=decision, order_payload=order_payload)
         return None

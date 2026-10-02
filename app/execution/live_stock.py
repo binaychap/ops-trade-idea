@@ -1,4 +1,5 @@
 """Live-only bullish cash entries with durable intent and manual exits."""
+import logging
 from decimal import Decimal, ROUND_FLOOR
 from hashlib import sha256
 
@@ -6,6 +7,13 @@ from app.broker.quotes import current_stock_quote
 from app.broker.stocks import StockExecution, checked_json
 from app.exits.next_day import ExitCalendar
 from app.persistence.ledger import Ledger
+
+logger = logging.getLogger(__name__)
+
+
+def _skip_stock_buy(symbol, reason):
+    logger.info('Skipping live stock buy for %s: %s', symbol, reason)
+    return {'skipped': True, 'reason': reason}
 
 
 def cash_amount(settings, budget=None):
@@ -65,7 +73,7 @@ def submit_live_stock(symbol, settings, fingerprint, *, account_resolver,
         def market_open():
             return calendar.is_open(datetime.now(UTC))
     if not market_open():
-        return {'skipped': True, 'reason': 'outside_market_hours'}
+        return _skip_stock_buy(symbol, 'outside_market_hours')
     quote_provider = quote_provider or (lambda s: current_stock_quote(s, max_age_seconds=60))
     price = Decimal(str(quote_provider(symbol)['price']))
     if not price.is_finite() or price <= 0:
@@ -73,7 +81,7 @@ def submit_live_stock(symbol, settings, fingerprint, *, account_resolver,
     try:
         amounts = split_cash_amount(amount, price)
     except ValueError as exc:
-        return {'skipped': True, 'reason': str(exc)}
+        return _skip_stock_buy(symbol, str(exc))
     orders = [dict(request, total_cash_amount=f'{part:.2f}', client_order_id=(
         order_id if index == 0 else 'cash-' + sha256(f'split-leg:{fingerprint}:{index}'.encode()).hexdigest()[:27]
     )) for index, part in enumerate(amounts)]
@@ -88,16 +96,16 @@ def submit_live_stock(symbol, settings, fingerprint, *, account_resolver,
     ledger = Ledger(settings.database_path)
     with ledger.exit_worker_lock() as acquired:
         if not acquired:
-            return {'skipped': True, 'reason': 'Stock submission lock busy'}
+            return _skip_stock_buy(symbol, 'Stock submission lock busy')
         if any(job.get('kind') != 'live_cash'
                and job.get('account_id') == account_id
                and job.get('symbol') == symbol
                for job in ledger.exit_jobs()):
-            return {'skipped': True, 'reason': 'Stock already has an active exit job'}
+            return _skip_stock_buy(symbol, 'Stock already has an active exit job')
         if broker.position(account_id, symbol) != 0:
-            return {'skipped': True, 'reason': 'Live cash entry requires a flat stock position'}
+            return _skip_stock_buy(symbol, 'Live cash entry requires a flat stock position')
         if not market_open():
-            return {'skipped': True, 'reason': 'outside_market_hours'}
+            return _skip_stock_buy(symbol, 'outside_market_hours')
         job = {
             'id': order_id, 'kind': 'live_cash', 'account_id': account_id,
             'symbol': symbol, 'entry_id': order_id, 'status': 'waiting_entry',
@@ -112,10 +120,13 @@ def submit_live_stock(symbol, settings, fingerprint, *, account_resolver,
             reserve_daily_budget(settings.database_path, 'live_bullish_stocks', order_id,
                                  amount, getattr(settings, 'live_bullish_daily_limit_usd', 100))
         except DailyBudgetExceeded as exc:
-            return {'skipped': True, 'reason': str(exc)}
+            return _skip_stock_buy(symbol, str(exc))
         # Permanent reservation also prevents a replay after a completed exit.
         if not ledger.reserve('live-stock:' + order_id, {'orders': orders}):
-            return {'skipped': True, 'reason': 'Live stock attempt already recorded; reconcile before retrying'}
+            return _skip_stock_buy(
+                symbol,
+                'Live stock attempt already recorded; reconcile before retrying',
+            )
         ledger.register_exit_job(job)
         if before_submit is not None:
             try:
@@ -147,7 +158,7 @@ def submit_live_stock(symbol, settings, fingerprint, *, account_resolver,
             if not receipts:
                 job['status'] = 'complete'
                 ledger.save_exit_job(job)
-                return {'skipped': True, 'reason': 'outside_market_hours'}
+                return _skip_stock_buy(symbol, 'outside_market_hours')
             job['status'] = 'manual_management'
             ledger.save_exit_job(job)
         except Exception:
