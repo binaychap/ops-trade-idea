@@ -101,8 +101,7 @@ class StockExecution:
             expected_cash = quantity(cash_amount)
             if expected_cash <= 0:
                 raise ValueError('Invalid persisted cash amount')
-            # Order-detail responses need not echo the placement cash amount.
-            # Identity and actual fills remain mandatory; validate any echo supplied.
+            # Webull order detail may omit this placement-only field; validate it if echoed.
             if 'total_cash_amount' in raw and quantity(raw['total_cash_amount']) != expected_cash:
                 raise ValueError('Cash order differs from persisted intent')
             # Cash orders have no fixed requested share count. Reconcile actual fills.
@@ -123,6 +122,8 @@ class StockExecution:
                 filled_at = datetime.fromtimestamp(int(raw['filled_time']) / 1000, UTC)
         filled_price = None
         if cash_amount is not None and filled:
+            if raw.get('filled_price') is None:
+                raise ValueError('Cash entry fill price missing; reconciliation deferred')
             filled_price = quantity(raw['filled_price'])
             if filled_price <= 0:
                 raise ValueError('Missing positive cash entry fill price')

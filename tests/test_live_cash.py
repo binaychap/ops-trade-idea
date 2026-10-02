@@ -147,6 +147,7 @@ def test_lost_exit_response_is_not_replayed_after_restart(tmp_path):
     restarted.run_once(NOW)
     assert broker.market_sell.call_count == 1
     assert ledger.exit_jobs()[0]['last_error']
+    assert ledger.exit_jobs()[0]['next_check_at'] is not None
 
 
 def test_confirmed_exit_fill_completes_tracking(tmp_path):
@@ -161,14 +162,37 @@ def test_confirmed_exit_fill_completes_tracking(tmp_path):
 
 
 def test_cash_entry_parser_does_not_require_fixed_quantity():
+    # Production order detail never echoes total_cash_amount (place-order
+    # request field only); the parser must reconcile without it.
     raw = {'client_order_id': 'entry', 'symbol': 'AAPL', 'side': 'BUY',
            'instrument_type': 'EQUITY', 'status': 'FILLED', 'filled_quantity': '.5',
-           'filled_price': '200', 'entrust_type': 'AMOUNT', 'total_cash_amount': '100',
+           'filled_price': '200', 'entrust_type': 'AMOUNT',
            'filled_time_at': NOW.isoformat()}
     sdk = SimpleNamespace(order_v3=SimpleNamespace(get_order_detail=lambda *a: SimpleNamespace(
         status_code=200, json=lambda: {'orders': [raw]})))
     order = StockExecution(sdk).order('account', 'entry', 'AAPL', 'BUY', cash_amount='100')
     assert order.filled == Decimal('.5') and order.filled_price == Decimal(200)
+
+
+def test_cash_entry_parser_defers_without_crash_on_missing_fill_price():
+    raw = {'client_order_id': 'entry', 'symbol': 'AAPL', 'side': 'BUY',
+           'instrument_type': 'EQUITY', 'status': 'FILLED', 'filled_quantity': '.5',
+           'entrust_type': 'AMOUNT', 'filled_time_at': NOW.isoformat()}
+    sdk = SimpleNamespace(order_v3=SimpleNamespace(get_order_detail=lambda *a: SimpleNamespace(
+        status_code=200, json=lambda: {'orders': [raw]})))
+    with pytest.raises(ValueError, match='fill price missing'):
+        StockExecution(sdk).order('account', 'entry', 'AAPL', 'BUY', cash_amount='100')
+
+
+def test_cash_entry_parser_rejects_non_amount_entrust_type():
+    raw = {'client_order_id': 'entry', 'symbol': 'AAPL', 'side': 'BUY',
+           'instrument_type': 'EQUITY', 'status': 'FILLED', 'filled_quantity': '.5',
+           'filled_price': '200', 'entrust_type': 'QTY', 'total_quantity': '1',
+           'filled_time_at': NOW.isoformat()}
+    sdk = SimpleNamespace(order_v3=SimpleNamespace(get_order_detail=lambda *a: SimpleNamespace(
+        status_code=200, json=lambda: {'orders': [raw]})))
+    with pytest.raises(ValueError, match='differs from persisted intent'):
+        StockExecution(sdk).order('account', 'entry', 'AAPL', 'BUY', cash_amount='100')
 
 
 def test_main_routes_only_live_bullish_stocks_to_cash(tmp_path, monkeypatch):
